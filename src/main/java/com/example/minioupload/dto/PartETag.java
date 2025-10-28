@@ -7,10 +7,9 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Data Transfer Object for part ETag information.
+ * 分片ETag信息的数据传输对象。
  * 
- * Used in the complete upload request to specify which parts
- * were uploaded and their corresponding ETags for verification.
+ * 在完成上传请求中使用，以指定已上传的分片及其对应的ETag以供验证。
  */
 @Data
 @NoArgsConstructor
@@ -18,16 +17,16 @@ import lombok.NoArgsConstructor;
 public class PartETag {
 
     /**
-     * Part number (1-based).
-     * Must be positive and correspond to an uploaded part.
+     * 分片编号（从1开始）。
+     * 必须为正数且对应于已上传的分片。
      */
     @Positive(message = "partNumber must be positive")
     private int partNumber;
 
     /**
-     * ETag returned by S3/MinIO after uploading the part.
-     * This is extracted from the ETag header in the upload response.
-     * Required for S3 to verify and assemble the parts correctly.
+     * S3/MinIO在上传分片后返回的ETag。
+     * 这是从上传响应的ETag标头中提取的。
+     * S3需要此信息来正确验证和组装分片。
      */
     @NotBlank(message = "eTag is required")
     private String eTag;

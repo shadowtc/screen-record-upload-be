@@ -7,10 +7,9 @@ import lombok.NoArgsConstructor;
 import java.time.Instant;
 
 /**
- * Data Transfer Object for pre-signed upload URL response.
+ * 预签名上传URL响应的数据传输对象。
  * 
- * Contains a time-limited URL that clients can use to upload
- * a specific part directly to S3/MinIO via HTTP PUT.
+ * 包含客户端可用于通过HTTP PUT直接上传特定分片到S3/MinIO的具有时间限制的URL。
  */
 @Data
 @NoArgsConstructor
@@ -18,21 +17,21 @@ import java.time.Instant;
 public class PresignedUrlResponse {
 
     /**
-     * Part number this URL is for (1-based).
-     * Must match the part number when uploading.
+     * 此URL对应的分片编号（从1开始）。
+     * 上传时必须与分片编号匹配。
      */
     private int partNumber;
 
     /**
-     * Pre-signed URL for uploading this part.
-     * Client should send HTTP PUT request with part data to this URL.
-     * The response will include an ETag header that must be saved for completion.
+     * 用于上传此分片的预签名URL。
+     * 客户端应向此URL发送带有分片数据的HTTP PUT请求。
+     * 响应将包含必须保存以供完成的ETag标头。
      */
     private String url;
 
     /**
-     * Timestamp when this URL expires.
-     * After expiration, the URL cannot be used and a new one must be requested.
+     * 此URL过期时的时间戳。
+     * 过期后，URL无法使用，必须请求新的URL。
      */
     private Instant expiresAt;
 }

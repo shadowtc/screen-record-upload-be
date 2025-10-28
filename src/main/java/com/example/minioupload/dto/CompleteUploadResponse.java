@@ -7,10 +7,9 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 /**
- * Data Transfer Object for completed upload response.
+ * 已完成上传响应的数据传输对象。
  * 
- * Contains metadata about the successfully uploaded file including
- * database record information and a download URL.
+ * 包含成功上传文件的元数据，包括数据库记录信息和下载URL。
  */
 @Data
 @NoArgsConstructor
@@ -18,45 +17,45 @@ import java.time.LocalDateTime;
 public class CompleteUploadResponse {
 
     /**
-     * Database ID of the video recording record.
-     * Can be used for future queries and updates.
+     * 视频录制记录的数据库ID。
+     * 可用于未来的查询和更新。
      */
     private Long id;
 
     /**
-     * Original filename of the uploaded file.
-     * Extracted from the object key.
+     * 已上传文件的原始文件名。
+     * 从对象键中提取。
      */
     private String filename;
 
     /**
-     * Total size of the uploaded file in bytes.
-     * Retrieved from S3/MinIO after completion.
+     * 已上传文件的总大小（字节）。
+     * 完成后从S3/MinIO获取。
      */
     private Long size;
 
     /**
-     * S3 object key where the file is stored.
-     * Can be used to access the file programmatically.
+     * 文件存储的S3对象键。
+     * 可用于以编程方式访问文件。
      */
     private String objectKey;
 
     /**
-     * Upload status (e.g., "COMPLETED").
-     * Indicates the final state of the upload.
+     * 上传状态（例如"COMPLETED"）。
+     * 指示上传的最终状态。
      */
     private String status;
 
     /**
-     * Pre-signed download URL for accessing the file.
-     * Time-limited URL that expires after configured duration.
-     * Allows direct download from S3/MinIO without authentication.
+     * 用于访问文件的预签名下载URL。
+     * 具有时间限制的URL，在配置的持续时间后过期。
+     * 允许从S3/MinIO直接下载而无需身份验证。
      */
     private String downloadUrl;
 
     /**
-     * Timestamp when the record was created in the database.
-     * Automatically set during persistence.
+     * 记录在数据库中创建时的时间戳。
+     * 在持久化期间自动设置。
      */
     private LocalDateTime createdAt;
 }

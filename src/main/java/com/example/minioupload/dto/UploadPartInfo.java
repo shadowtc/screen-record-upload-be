@@ -5,10 +5,10 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Data Transfer Object for uploaded part information.
+ * 已上传分片信息的数据传输对象。
  * 
- * Contains metadata about a successfully uploaded part from S3/MinIO.
- * Used to inform clients which parts have been uploaded for resumability.
+ * 包含来自S3/MinIO的成功上传分片的元数据。
+ * 用于通知客户端哪些分片已上传以实现可恢复性。
  */
 @Data
 @NoArgsConstructor
@@ -16,20 +16,20 @@ import lombok.NoArgsConstructor;
 public class UploadPartInfo {
 
     /**
-     * Part number (1-based).
+     * 分片编号（从1开始）。
      */
     private int partNumber;
 
     /**
-     * ETag of the uploaded part from S3/MinIO.
-     * This is a hash/checksum used to verify part integrity.
-     * Required for completing the multipart upload.
+     * 来自S3/MinIO的已上传分片的ETag。
+     * 这是用于验证分片完整性的哈希/校验和。
+     * 完成分片上传所必需的。
      */
     private String etag;
 
     /**
-     * Size of the uploaded part in bytes.
-     * Useful for calculating upload progress.
+     * 已上传分片的大小（字节）。
+     * 用于计算上传进度。
      */
     private long size;
 }

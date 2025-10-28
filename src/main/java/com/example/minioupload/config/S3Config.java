@@ -13,16 +13,16 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import java.net.URI;
 
 /**
- * Spring configuration class for S3/MinIO client beans.
+ * S3/MinIO客户端Bean的Spring配置类。
  * 
- * This configuration creates and configures AWS SDK v2 beans for:
- * 1. S3Client - for standard S3 operations (create, complete, abort uploads)
- * 2. S3Presigner - for generating pre-signed URLs
+ * 此配置创建并配置AWS SDK v2的以下Bean：
+ * 1. S3Client - 用于标准S3操作（创建、完成、中止上传）
+ * 2. S3Presigner - 用于生成预签名URL
  * 
- * Both beans are configured with the same credentials and endpoint from
- * S3ConfigProperties, ensuring consistent behavior across the application.
+ * 两个Bean均使用来自S3ConfigProperties的相同凭证和端点进行配置，
+ * 确保整个应用程序的行为一致。
  * 
- * The configuration supports both AWS S3 and S3-compatible storage like MinIO.
+ * 此配置同时支持AWS S3和S3兼容存储（如MinIO）。
  */
 @Configuration
 @RequiredArgsConstructor
@@ -30,27 +30,27 @@ import java.net.URI;
 public class S3Config {
 
     /**
-     * Injected S3/MinIO configuration properties
+     * 注入的S3/MinIO配置属性
      */
     private final S3ConfigProperties s3ConfigProperties;
 
     /**
-     * Creates and configures the S3 client bean.
+     * 创建并配置S3客户端Bean。
      * 
-     * This client is used for standard S3 operations such as:
-     * - Creating multipart uploads
-     * - Completing multipart uploads
-     * - Aborting multipart uploads
-     * - Listing upload parts
-     * - Retrieving object metadata
+     * 此客户端用于标准的S3操作，例如：
+     * - 创建分片上传
+     * - 完成分片上传
+     * - 中止分片上传
+     * - 列出上传的分片
+     * - 获取对象元数据
      * 
-     * Configuration includes:
-     * - Custom endpoint for MinIO compatibility
-     * - AWS region setting
-     * - Static credentials (access key + secret key)
-     * - Path-style access for MinIO
+     * 配置包括：
+     * - 用于MinIO兼容性的自定义端点
+     * - AWS区域设置
+     * - 静态凭证（访问密钥 + 秘密密钥）
+     * - MinIO的路径样式访问
      * 
-     * @return configured S3Client instance
+     * @return 配置好的S3Client实例
      */
     @Bean
     public S3Client s3Client() {
@@ -59,13 +59,13 @@ public class S3Config {
                 s3ConfigProperties.getRegion(),
                 s3ConfigProperties.getBucket());
         
-        // Create credentials from configuration
+        // 从配置创建凭证
         AwsBasicCredentials credentials = AwsBasicCredentials.create(
                 s3ConfigProperties.getAccessKey(),
                 s3ConfigProperties.getSecretKey()
         );
 
-        // Build and configure S3 client
+        // 构建和配置S3客户端
         S3Client client = S3Client.builder()
                 .endpointOverride(URI.create(s3ConfigProperties.getEndpoint()))
                 .region(Region.of(s3ConfigProperties.getRegion()))
@@ -78,36 +78,36 @@ public class S3Config {
     }
 
     /**
-     * Creates and configures the S3 pre-signer bean.
+     * 创建并配置S3预签名器Bean。
      * 
-     * This pre-signer is used to generate time-limited, signed URLs that allow:
-     * - Clients to upload parts directly to S3/MinIO
-     * - Clients to download files directly from S3/MinIO
+     * 此预签名器用于生成具有时间限制的签名URL，允许：
+     * - 客户端直接上传分片到S3/MinIO
+     * - 客户端直接从S3/MinIO下载文件
      * 
-     * Pre-signed URLs eliminate the need for clients to have AWS credentials
-     * and reduce server bandwidth by enabling direct client-to-S3 transfers.
+     * 预签名URL消除了客户端拥有AWS凭证的需要，
+     * 并通过启用客户端到S3的直接传输来减少服务器带宽。
      * 
-     * Configuration includes:
-     * - Custom endpoint for MinIO compatibility
-     * - AWS region setting
-     * - Static credentials (access key + secret key)
+     * 配置包括：
+     * - 用于MinIO兼容性的自定义端点
+     * - AWS区域设置
+     * - 静态凭证（访问密钥 + 秘密密钥）
      * 
-     * Note: Unlike S3Client, S3Presigner doesn't support forcePathStyle() method,
-     * but it works correctly with MinIO when the endpoint is properly configured.
+     * 注意：与S3Client不同，S3Presigner不支持forcePathStyle()方法，
+     * 但在正确配置端点后可以正常与MinIO配合工作。
      * 
-     * @return configured S3Presigner instance
+     * @return 配置好的S3Presigner实例
      */
     @Bean
     public S3Presigner s3Presigner() {
         log.info("Initializing S3Presigner");
         
-        // Create credentials from configuration
+        // 从配置创建凭证
         AwsBasicCredentials credentials = AwsBasicCredentials.create(
                 s3ConfigProperties.getAccessKey(),
                 s3ConfigProperties.getSecretKey()
         );
 
-        // Build and configure S3 pre-signer
+        // 构建和配置S3预签名器
         S3Presigner presigner = S3Presigner.builder()
                 .endpointOverride(URI.create(s3ConfigProperties.getEndpoint()))
                 .region(Region.of(s3ConfigProperties.getRegion()))

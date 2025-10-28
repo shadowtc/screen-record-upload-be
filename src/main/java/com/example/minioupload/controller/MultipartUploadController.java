@@ -12,17 +12,17 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 /**
- * REST Controller for multipart upload operations to S3/MinIO.
+ * S3/MinIO分片上传操作的REST控制器。
  * 
- * This controller provides endpoints for the complete lifecycle of multipart uploads:
- * 1. Initialize a new upload session
- * 2. Generate pre-signed URLs for uploading parts
- * 3. Check upload status and retrieve uploaded parts
- * 4. Complete the upload and persist metadata
- * 5. Abort/cancel an upload
+ * 此控制器为分片上传的完整生命周期提供端点：
+ * 1. 初始化新的上传会话
+ * 2. 生成用于上传分片的预签名URL
+ * 3. 检查上传状态并获取已上传的分片
+ * 4. 完成上传并持久化元数据
+ * 5. 中止/取消上传
  * 
- * All endpoints follow RESTful conventions and return appropriate HTTP status codes.
- * Request validation is enforced using Jakarta Bean Validation annotations.
+ * 所有端点都遵循RESTful约定并返回适当的HTTP状态码。
+ * 使用Jakarta Bean Validation注解强制执行请求验证。
  */
 @RestController
 @RequestMapping("/api/uploads")
@@ -31,18 +31,18 @@ import java.util.List;
 public class MultipartUploadController {
 
     /**
-     * Service layer for handling multipart upload business logic
+     * 处理分片上传业务逻辑的服务层
      */
     private final MultipartUploadService multipartUploadService;
 
     /**
-     * Initializes a new multipart upload session.
+     * 初始化新的分片上传会话。
      * 
-     * This endpoint validates the request and creates a new upload session in S3/MinIO.
-     * The client receives an uploadId and objectKey to use for subsequent operations.
+     * 此端点验证请求并在S3/MinIO中创建新的上传会话。
+     * 客户端将收到uploadId和objectKey以用于后续操作。
      * 
-     * @param request validated request containing filename, size, content type, and optional chunk size
-     * @return InitUploadResponse with uploadId, objectKey, part size, and part number range
+     * @param request 经过验证的请求，包含文件名、大小、内容类型和可选的分片大小
+     * @return 包含uploadId、objectKey、分片大小和分片编号范围的InitUploadResponse
      */
     @PostMapping("/init")
     public ResponseEntity<InitUploadResponse> initializeUpload(@Valid @RequestBody InitUploadRequest request) {
@@ -52,17 +52,16 @@ public class MultipartUploadController {
     }
 
     /**
-     * Generates pre-signed URLs for uploading specific parts.
+     * 为上传特定分片生成预签名URL。
      * 
-     * This endpoint returns time-limited URLs that clients can use to upload
-     * parts directly to S3/MinIO without going through this server.
-     * Parts can be uploaded in parallel for better performance.
+     * 此端点返回具有时间限制的URL，客户端可以使用这些URL直接上传分片到S3/MinIO，
+     * 无需通过此服务器。分片可以并行上传以获得更好的性能。
      * 
-     * @param uploadId the upload session ID from initialization
-     * @param objectKey the S3 object key from initialization
-     * @param startPartNumber first part number to generate URL for (1-based, inclusive)
-     * @param endPartNumber last part number to generate URL for (1-based, inclusive)
-     * @return List of pre-signed URLs with expiration timestamps
+     * @param uploadId 来自初始化的上传会话ID
+     * @param objectKey 来自初始化的S3对象键
+     * @param startPartNumber 要生成URL的第一个分片编号（从1开始，包含）
+     * @param endPartNumber 要生成URL的最后一个分片编号（从1开始，包含）
+     * @return 包含过期时间戳的预签名URL列表
      */
     @GetMapping("/{uploadId}/parts")
     public ResponseEntity<List<PresignedUrlResponse>> getPresignedUrls(
@@ -77,15 +76,14 @@ public class MultipartUploadController {
     }
 
     /**
-     * Retrieves the current status of an upload.
+     * 获取上传的当前状态。
      * 
-     * This endpoint returns information about which parts have been successfully
-     * uploaded to S3/MinIO. Useful for resuming interrupted uploads or displaying
-     * progress to users.
+     * 此端点返回有关哪些分片已成功上传到S3/MinIO的信息。
+     * 对于恢复中断的上传或向用户显示进度很有用。
      * 
-     * @param uploadId the upload session ID from initialization
-     * @param objectKey the S3 object key from initialization
-     * @return List of uploaded part information including part numbers, ETags, and sizes
+     * @param uploadId 来自初始化的上传会话ID
+     * @param objectKey 来自初始化的S3对象键
+     * @return 包含分片编号、ETag和大小的已上传分片信息列表
      */
     @GetMapping("/{uploadId}/status")
     public ResponseEntity<List<UploadPartInfo>> getUploadStatus(
@@ -97,14 +95,13 @@ public class MultipartUploadController {
     }
 
     /**
-     * Completes a multipart upload.
+     * 完成分片上传。
      * 
-     * This endpoint finalizes the upload by combining all parts into a single object
-     * in S3/MinIO and persisting the metadata to MySQL. After completion, the file
-     * becomes available for download.
+     * 此端点通过将所有分片合并为S3/MinIO中的单个对象并将元数据持久化到MySQL来完成上传。
+     * 完成后，文件可供下载。
      * 
-     * @param request validated request containing uploadId, objectKey, and list of part ETags
-     * @return CompleteUploadResponse with file metadata and pre-signed download URL
+     * @param request 经过验证的请求，包含uploadId、objectKey和分片ETag列表
+     * @return 包含文件元数据和预签名下载URL的CompleteUploadResponse
      */
     @PostMapping("/complete")
     public ResponseEntity<CompleteUploadResponse> completeUpload(@Valid @RequestBody CompleteUploadRequest request) {
@@ -114,14 +111,13 @@ public class MultipartUploadController {
     }
 
     /**
-     * Aborts a multipart upload.
+     * 中止分片上传。
      * 
-     * This endpoint cancels an upload and cleans up all uploaded parts from S3/MinIO.
-     * Should be called when the client decides to cancel the upload or when the upload
-     * cannot be completed successfully.
+     * 此端点取消上传并从S3/MinIO清理所有已上传的分片。
+     * 当客户端决定取消上传或无法成功完成上传时应调用此方法。
      * 
-     * @param request validated request containing uploadId and objectKey
-     * @return 204 No Content on successful abortion
+     * @param request 经过验证的请求，包含uploadId和objectKey
+     * @return 成功中止时返回204 No Content
      */
     @PostMapping("/abort")
     public ResponseEntity<Void> abortUpload(@Valid @RequestBody AbortUploadRequest request) {

@@ -23,20 +23,20 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Service class for handling multipart upload operations to S3/MinIO.
+ * 处理S3/MinIO分片上传操作的服务类。
  * 
- * This service provides comprehensive support for resumable multipart uploads including:
- * - Initialization of multipart uploads with validation
- * - Pre-signed URL generation for direct client-side uploads
- * - Upload status tracking and part verification
- * - Upload completion with metadata persistence to MySQL
- * - Upload abortion for cleanup
+ * 此服务为可恢复的分片上传提供全面支持，包括：
+ * - 带验证的分片上传初始化
+ * - 用于客户端直接上传的预签名URL生成
+ * - 上传状态跟踪和分片验证
+ * - 带MySQL元数据持久化的上传完成
+ * - 用于清理的上传中止
  * 
- * The service is optimized for large file uploads by:
- * - Using configurable chunk sizes
- * - Generating pre-signed URLs to avoid server-side upload bottlenecks
- * - Tracking upload progress in S3 for resumability
- * - Storing only metadata in MySQL for efficient querying
+ * 该服务针对大文件上传进行了优化：
+ * - 使用可配置的分片大小
+ * - 生成预签名URL以避免服务器端上传瓶颈
+ * - 在S3中跟踪上传进度以实现可恢复性
+ * - 仅在MySQL中存储元数据以实现高效查询
  */
 @Service
 @Slf4j
@@ -44,78 +44,78 @@ import java.util.UUID;
 public class MultipartUploadService {
 
     /**
-     * S3 client for performing S3 operations (create, complete, abort multipart uploads)
+     * 用于执行S3操作的S3客户端（创建、完成、中止分片上传）
      */
     private final S3Client s3Client;
     
     /**
-     * S3 pre-signer for generating time-limited pre-signed URLs
+     * 用于生成具有时间限制的预签名URL的S3预签名器
      */
     private final S3Presigner s3Presigner;
     
     /**
-     * Configuration properties for S3/MinIO connection
+     * S3/MinIO连接的配置属性
      */
     private final S3ConfigProperties s3Config;
     
     /**
-     * Configuration properties for upload constraints and defaults
+     * 上传约束和默认值的配置属性
      */
     private final UploadConfigProperties uploadConfig;
     
     /**
-     * Repository for persisting video recording metadata to MySQL
+     * 用于将视频录制元数据持久化到MySQL的仓库
      */
     private final VideoRecordingRepository videoRecordingRepository;
 
     /**
-     * Constant for the uploads directory prefix in S3
+     * S3中上传目录前缀的常量
      */
     private static final String UPLOADS_PREFIX = "uploads/";
     
     /**
-     * Constant for completed upload status
+     * 已完成上传状态的常量
      */
     private static final String STATUS_COMPLETED = "COMPLETED";
 
     /**
-     * Initializes a new multipart upload session in S3/MinIO.
+     * 在S3/MinIO中初始化新的分片上传会话。
      * 
-     * This method performs the following operations:
-     * 1. Validates the file type (only video files allowed)
-     * 2. Validates the file size against configured maximum
-     * 3. Generates a unique S3 object key with UUID-based path
-     * 4. Creates a multipart upload session in S3
-     * 5. Calculates the optimal number of parts based on chunk size
+     * 此方法执行以下操作：
+     * 1. 验证文件类型（仅允许视频文件）
+     * 2. 根据配置的最大值验证文件大小
+     * 3. 生成基于UUID路径的唯一S3对象键
+     * 4. 在S3中创建分片上传会话
+     * 5. 根据分片大小计算最佳分片数
      * 
-     * @param request the upload initialization request containing file metadata
-     * @return InitUploadResponse with uploadId, objectKey, and part information
-     * @throws IllegalArgumentException if file type is not video or size exceeds limit
+     * @param request 包含文件元数据的上传初始化请求
+     * @return 包含uploadId、objectKey和分片信息的InitUploadResponse
+     * @throws IllegalArgumentException 如果文件类型不是视频或大小超出限制
      */
     public InitUploadResponse initializeUpload(InitUploadRequest request) {
         log.info("Initializing upload for file: {}, size: {} bytes", request.getFileName(), request.getSize());
         
-        // Validate file type - only video files are accepted
+        // 验证文件类型 - 仅接受视频文件
         if (!request.getContentType().startsWith("video/")) {
             log.warn("Upload rejected: invalid content type {}", request.getContentType());
             throw new IllegalArgumentException("Only video files are allowed");
         }
 
-        // Validate file size against configured maximum
+        // 根据配置的最大值验证文件大小
         if (request.getSize() > uploadConfig.getMaxFileSize()) {
             log.warn("Upload rejected: file size {} exceeds maximum {}", request.getSize(), uploadConfig.getMaxFileSize());
             throw new IllegalArgumentException("File size exceeds maximum allowed size");
         }
 
-        // Determine chunk size: use client-provided value or fall back to configured default
+        // 确定分片大小：使用客户端提供的值或回退到配置的默认值
         long chunkSize = request.getChunkSize() != null && request.getChunkSize() > 0
                 ? request.getChunkSize()
                 : uploadConfig.getDefaultChunkSize();
 
-        // Generate unique object key with UUID to prevent collisions
+        // 生成带有UUID的唯一对象键以防止冲突
         String objectKey = UPLOADS_PREFIX + UUID.randomUUID() + "/" + request.getFileName();
 
-        // Create multipart upload session in S3/MinIO
+        // 在S3/MinIO中创建分片上传会话
         CreateMultipartUploadRequest createRequest = CreateMultipartUploadRequest.builder()
                 .bucket(s3Config.getBucket())
                 .key(objectKey)
@@ -125,7 +125,7 @@ public class MultipartUploadService {
         CreateMultipartUploadResponse createResponse = s3Client.createMultipartUpload(createRequest);
         log.info("Multipart upload initialized with uploadId: {}, objectKey: {}", createResponse.uploadId(), objectKey);
 
-        // Calculate total number of parts needed for the upload
+        // 计算上传所需的总分片数
         int maxPartNumber = (int) Math.ceil((double) request.getSize() / chunkSize);
 
         return new InitUploadResponse(
@@ -138,21 +138,20 @@ public class MultipartUploadService {
     }
 
     /**
-     * Generates pre-signed URLs for uploading specific parts of a multipart upload.
+     * 为上传分片上传的特定分片生成预签名URL。
      * 
-     * Pre-signed URLs allow clients to upload parts directly to S3/MinIO without
-     * going through the application server, which:
-     * - Reduces server bandwidth and processing
-     * - Improves upload performance
-     * - Enables client-side retry logic for failed parts
+     * 预签名URL允许客户端直接上传分片到S3/MinIO而无需通过应用程序服务器，这样可以：
+     * - 减少服务器带宽和处理
+     * - 提高上传性能
+     * - 为失败的分片启用客户端重试逻辑
      * 
-     * Each URL is time-limited and specific to one part number.
+     * 每个URL都具有时间限制并特定于一个分片编号。
      * 
-     * @param uploadId the multipart upload ID from S3
-     * @param objectKey the S3 object key for the upload
-     * @param startPartNumber the first part number to generate URL for (inclusive)
-     * @param endPartNumber the last part number to generate URL for (inclusive)
-     * @return List of PresignedUrlResponse objects containing URLs and metadata
+     * @param uploadId 来自S3的分片上传ID
+     * @param objectKey 上传的S3对象键
+     * @param startPartNumber 要生成URL的第一个分片编号（包含）
+     * @param endPartNumber 要生成URL的最后一个分片编号（包含）
+     * @return 包含URL和元数据的PresignedUrlResponse对象列表
      */
     public List<PresignedUrlResponse> generatePresignedUrls(
             String uploadId,
@@ -166,7 +165,7 @@ public class MultipartUploadService {
         Duration expiration = Duration.ofMinutes(uploadConfig.getPresignedUrlExpirationMinutes());
         Instant expiresAt = Instant.now().plus(expiration);
 
-        // Generate a pre-signed URL for each part in the specified range
+        // 为指定范围内的每个分片生成预签名URL
         for (int partNumber = startPartNumber; partNumber <= endPartNumber; partNumber++) {
             UploadPartRequest uploadPartRequest = UploadPartRequest.builder()
                     .bucket(s3Config.getBucket())
@@ -194,16 +193,16 @@ public class MultipartUploadService {
     }
 
     /**
-     * Retrieves the current status of a multipart upload by listing all uploaded parts.
+     * 通过列出所有已上传的分片来获取分片上传的当前状态。
      * 
-     * This method is useful for:
-     * - Resuming interrupted uploads by identifying which parts are already uploaded
-     * - Displaying upload progress to users
-     * - Verifying all parts are uploaded before completing the upload
+     * 此方法适用于：
+     * - 通过识别已上传的分片来恢复中断的上传
+     * - 向用户显示上传进度
+     * - 在完成上传前验证所有分片是否已上传
      * 
-     * @param uploadId the multipart upload ID from S3
-     * @param objectKey the S3 object key for the upload
-     * @return List of UploadPartInfo containing part number, ETag, and size for each uploaded part
+     * @param uploadId 来自S3的分片上传ID
+     * @param objectKey 上传的S3对象键
+     * @return 包含每个已上传分片的分片编号、ETag和大小的UploadPartInfo列表
      */
     public List<UploadPartInfo> getUploadStatus(String uploadId, String objectKey) {
         log.info("Retrieving upload status for uploadId: {}, objectKey: {}", uploadId, objectKey);
@@ -216,7 +215,7 @@ public class MultipartUploadService {
 
         ListPartsResponse listPartsResponse = s3Client.listParts(listPartsRequest);
 
-        // Convert S3 Part objects to our DTO format with preallocated capacity
+        // 将S3的Part对象转换为我们的DTO格式，并预分配容量
         List<UploadPartInfo> uploadedParts = new ArrayList<>(listPartsResponse.parts().size());
         for (Part part : listPartsResponse.parts()) {
             uploadedParts.add(new UploadPartInfo(
@@ -231,27 +230,26 @@ public class MultipartUploadService {
     }
 
     /**
-     * Completes a multipart upload and persists metadata to MySQL database.
+     * 完成分片上传并将元数据持久化到MySQL数据库。
      * 
-     * This method performs the following operations:
-     * 1. Converts client-provided part ETags to S3 CompletedPart format
-     * 2. Sends completion request to S3/MinIO to finalize the upload
-     * 3. Retrieves final object metadata (size, ETag) from S3
-     * 4. Persists video recording metadata to MySQL for future queries
-     * 5. Generates a pre-signed download URL for the uploaded file
+     * 此方法执行以下操作：
+     * 1. 将客户端提供的分片ETag转换为S3 CompletedPart格式
+     * 2. 向S3/MinIO发送完成请求以最终确定上传
+     * 3. 从S3获取最终对象元数据（大小、ETag）
+     * 4. 将视频录制元数据持久化到MySQL以供将来查询
+     * 5. 为已上传文件生成预签名下载URL
      * 
-     * After this operation, the file becomes available for download from S3/MinIO
-     * and its metadata is searchable via MySQL.
+     * 此操作后，文件可从S3/MinIO下载，其元数据可通过MySQL搜索。
      * 
-     * @param request the completion request containing uploadId, objectKey, and part ETags
-     * @return CompleteUploadResponse with file metadata and download URL
-     * @throws S3Exception if S3 operation fails (e.g., invalid part ETags)
+     * @param request 包含uploadId、objectKey和分片ETag的完成请求
+     * @return 包含文件元数据和下载URL的CompleteUploadResponse
+     * @throws S3Exception 如果S3操作失败（例如分片ETag无效）
      */
     @Transactional
     public CompleteUploadResponse completeUpload(CompleteUploadRequest request) {
         log.info("Completing upload for uploadId: {}, objectKey: {}", request.getUploadId(), request.getObjectKey());
         
-        // Convert DTOs to S3 SDK format with preallocated capacity
+        // 将DTO转换为S3 SDK格式，并预分配容量
         List<CompletedPart> completedParts = new ArrayList<>(request.getParts().size());
         for (PartETag partETag : request.getParts()) {
             completedParts.add(CompletedPart.builder()
@@ -264,7 +262,7 @@ public class MultipartUploadService {
                 .parts(completedParts)
                 .build();
 
-        // Complete the multipart upload in S3/MinIO
+        // 在S3/MinIO中完成分片上传
         CompleteMultipartUploadRequest completeRequest = CompleteMultipartUploadRequest.builder()
                 .bucket(s3Config.getBucket())
                 .key(request.getObjectKey())
@@ -275,7 +273,7 @@ public class MultipartUploadService {
         CompleteMultipartUploadResponse completeResponse = s3Client.completeMultipartUpload(completeRequest);
         log.info("Multipart upload completed successfully with ETag: {}", completeResponse.eTag());
 
-        // Retrieve final object metadata from S3
+        // 从S3获取最终对象元数据
         HeadObjectRequest headRequest = HeadObjectRequest.builder()
                 .bucket(s3Config.getBucket())
                 .key(request.getObjectKey())
@@ -283,10 +281,10 @@ public class MultipartUploadService {
 
         HeadObjectResponse headResponse = s3Client.headObject(headRequest);
 
-        // Extract filename from object key (last segment after /)
+        // 从对象键提取文件名（/之后的最后一段）
         String filename = request.getObjectKey().substring(request.getObjectKey().lastIndexOf("/") + 1);
 
-        // Build and persist video recording metadata to MySQL using builder pattern
+        // 使用构建器模式构建并将视频录制元数据持久化到MySQL
         VideoRecording recording = VideoRecording.builder()
                 .filename(filename)
                 .size(headResponse.contentLength())
@@ -298,7 +296,7 @@ public class MultipartUploadService {
         VideoRecording savedRecording = videoRecordingRepository.save(recording);
         log.info("Video recording metadata saved to database with id: {}", savedRecording.getId());
 
-        // Generate time-limited download URL for the completed upload
+        // 为完成的上传生成具有时间限制的下载URL
         String downloadUrl = generateDownloadUrl(request.getObjectKey());
 
         return new CompleteUploadResponse(
@@ -313,17 +311,16 @@ public class MultipartUploadService {
     }
 
     /**
-     * Aborts a multipart upload and cleans up all uploaded parts.
+     * 中止分片上传并清理所有已上传的分片。
      * 
-     * This method should be called when:
-     * - User cancels the upload
-     * - Upload fails and cannot be retried
-     * - Upload exceeds time limits
+     * 此方法应在以下情况下调用：
+     * - 用户取消上传
+     * - 上传失败且无法重试
+     * - 上传超过时间限制
      * 
-     * Aborting an upload removes all parts from S3/MinIO storage,
-     * preventing storage costs from abandoned uploads.
+     * 中止上传会从S3/MinIO存储中删除所有分片，防止被放弃的上传产生存储成本。
      * 
-     * @param request the abort request containing uploadId and objectKey
+     * @param request 包含uploadId和objectKey的中止请求
      */
     public void abortUpload(AbortUploadRequest request) {
         log.info("Aborting upload for uploadId: {}, objectKey: {}", request.getUploadId(), request.getObjectKey());
@@ -339,16 +336,16 @@ public class MultipartUploadService {
     }
 
     /**
-     * Generates a pre-signed download URL for a completed upload.
+     * 为已完成的上传生成预签名下载URL。
      * 
-     * The generated URL is time-limited and allows direct download from S3/MinIO
-     * without requiring authentication from the client. This is useful for:
-     * - Sharing files with users who don't have S3 credentials
-     * - Embedding download links in emails or web pages
-     * - Providing temporary access to uploaded content
+     * 生成的URL具有时间限制，允许从S3/MinIO直接下载而无需客户端进行身份验证。
+     * 这对以下场景很有用：
+     * - 与没有S3凭证的用户共享文件
+     * - 在电子邮件或网页中嵌入下载链接
+     * - 为已上传内容提供临时访问
      * 
-     * @param objectKey the S3 object key for the file
-     * @return pre-signed URL string that expires after configured duration
+     * @param objectKey 文件的S3对象键
+     * @return 在配置的持续时间后过期的预签名URL字符串
      */
     private String generateDownloadUrl(String objectKey) {
         log.debug("Generating download URL for objectKey: {}", objectKey);

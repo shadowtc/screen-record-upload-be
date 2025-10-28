@@ -7,23 +7,22 @@ import org.springframework.stereotype.Repository;
 import java.util.Optional;
 
 /**
- * Repository interface for VideoRecording entity operations.
- * Provides database access methods for video recording metadata using Spring Data JPA.
+ * VideoRecording实体操作的仓库接口。
+ * 使用Spring Data JPA提供视频录制元数据的数据库访问方法。
  * 
- * This repository leverages MySQL 8.0 features and indexes defined in the VideoRecording entity
- * for optimized query performance.
+ * 此仓库利用VideoRecording实体中定义的MySQL 8.0功能和索引来优化查询性能。
  */
 @Repository
 public interface VideoRecordingRepository extends JpaRepository<VideoRecording, Long> {
     
     /**
-     * Finds a video recording by its S3/MinIO object key.
+     * 通过S3/MinIO对象键查找视频录制。
      * 
-     * This method utilizes the unique index on object_key column for efficient lookups.
-     * The object key serves as the unique identifier for files stored in S3/MinIO.
+     * 此方法利用object_key列上的唯一索引进行高效查找。
+     * 对象键用作存储在S3/MinIO中的文件的唯一标识符。
      * 
-     * @param objectKey the S3/MinIO object key to search for (e.g., "uploads/uuid/filename.mp4")
-     * @return Optional containing the VideoRecording if found, empty Optional otherwise
+     * @param objectKey 要搜索的S3/MinIO对象键（例如"uploads/uuid/filename.mp4"）
+     * @return 如果找到则包含VideoRecording的Optional，否则为空Optional
      */
     Optional<VideoRecording> findByObjectKey(String objectKey);
 }

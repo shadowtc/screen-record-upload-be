@@ -6,32 +6,31 @@ import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
- * CORS (Cross-Origin Resource Sharing) configuration.
+ * CORS（跨域资源共享）配置。
  * 
- * This configuration allows the API to be accessed from web applications
- * running on different domains. Essential for:
- * - Frontend applications hosted on different origins
- * - Development environments with separate frontend/backend servers
- * - Third-party integrations
+ * 此配置允许来自不同域的Web应用程序访问API。适用于以下场景：
+ * - 托管在不同域的前端应用程序
+ * - 前后端分离的开发环境
+ * - 第三方集成
  * 
- * Current configuration allows all origins (*) for simplicity.
- * In production, consider restricting to specific trusted origins.
+ * 当前配置为简化而允许所有源（*）。
+ * 在生产环境中，应考虑限制为特定的可信源。
  */
 @Configuration
 public class CorsConfig {
 
     /**
-     * Configures CORS mappings for the application.
+     * 为应用程序配置CORS映射。
      * 
-     * Current settings:
-     * - Applies to all /api/** endpoints
-     * - Allows all origins (*) - consider restricting in production
-     * - Allows common HTTP methods (GET, POST, PUT, DELETE, OPTIONS)
-     * - Allows all request headers
+     * 当前设置：
+     * - 应用于所有 /api/** 端点
+     * - 允许所有源（*）- 生产环境中应考虑限制
+     * - 允许常用的HTTP方法（GET、POST、PUT、DELETE、OPTIONS）
+     * - 允许所有请求头
      * 
-     * The OPTIONS method is included to support CORS preflight requests.
+     * 包含OPTIONS方法以支持CORS预检请求。
      * 
-     * @return WebMvcConfigurer with CORS settings
+     * @return 配置了CORS设置的WebMvcConfigurer
      */
     @Bean
     public WebMvcConfigurer corsConfigurer() {
@@ -39,7 +38,7 @@ public class CorsConfig {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/api/**")
-                        .allowedOrigins("*") // TODO: Restrict to specific origins in production
+                        .allowedOrigins("*") // TODO: 在生产环境中限制为特定源
                         .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                         .allowedHeaders("*");
             }
