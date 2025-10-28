@@ -1,41 +1,35 @@
 package com.example.minioupload.dto;
 
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+/**
+ * Data Transfer Object for uploaded part information.
+ * 
+ * Contains metadata about a successfully uploaded part from S3/MinIO.
+ * Used to inform clients which parts have been uploaded for resumability.
+ */
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
 public class UploadPartInfo {
 
+    /**
+     * Part number (1-based).
+     */
     private int partNumber;
+
+    /**
+     * ETag of the uploaded part from S3/MinIO.
+     * This is a hash/checksum used to verify part integrity.
+     * Required for completing the multipart upload.
+     */
     private String etag;
+
+    /**
+     * Size of the uploaded part in bytes.
+     * Useful for calculating upload progress.
+     */
     private long size;
-
-    public UploadPartInfo() {
-    }
-
-    public UploadPartInfo(int partNumber, String etag, long size) {
-        this.partNumber = partNumber;
-        this.etag = etag;
-        this.size = size;
-    }
-
-    public int getPartNumber() {
-        return partNumber;
-    }
-
-    public void setPartNumber(int partNumber) {
-        this.partNumber = partNumber;
-    }
-
-    public String getEtag() {
-        return etag;
-    }
-
-    public void setEtag(String etag) {
-        this.etag = etag;
-    }
-
-    public long getSize() {
-        return size;
-    }
-
-    public void setSize(long size) {
-        this.size = size;
-    }
 }
