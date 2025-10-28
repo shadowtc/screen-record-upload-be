@@ -6,13 +6,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * Configuration properties for file upload constraints and defaults.
+ * 文件上传约束和默认值的配置属性。
  * 
- * This class binds configuration values from application.yml (prefix: upload)
- * to strongly-typed Java properties. These settings control upload behavior
- * and limits across the application.
+ * 此类将application.yml中的配置值（前缀：upload）绑定到强类型的Java属性。
+ * 这些设置控制整个应用程序的上传行为和限制。
  * 
- * All values can be overridden by environment variables for deployment flexibility.
+ * 所有值都可以通过环境变量覆盖，以实现部署灵活性。
  */
 @Component
 @ConfigurationProperties(prefix = "upload")
@@ -21,39 +20,37 @@ import org.springframework.stereotype.Component;
 public class UploadConfigProperties {
     
     /**
-     * Maximum allowed file size in bytes.
+     * 允许的最大文件大小（字节）。
      * 
-     * Files larger than this will be rejected during upload initialization.
-     * Default: 2GB (2147483648 bytes)
+     * 大于此大小的文件将在上传初始化时被拒绝。
+     * 默认值：2GB（2147483648字节）
      * 
-     * Consider available storage and network bandwidth when setting this value.
+     * 设置此值时应考虑可用存储空间和网络带宽。
      */
     private long maxFileSize;
     
     /**
-     * Default chunk/part size for multipart uploads in bytes.
+     * 分片上传的默认分片/块大小（字节）。
      * 
-     * This size is used when the client doesn't specify a chunk size.
-     * Smaller chunks allow for more granular progress tracking but increase
-     * the number of HTTP requests. Larger chunks reduce overhead but may
-     * impact resumability on slow networks.
+     * 当客户端未指定分片大小时使用此大小。
+     * 较小的分片允许更精细的进度跟踪，但会增加HTTP请求数量。
+     * 较大的分片减少开销，但可能影响慢速网络的断点续传能力。
      * 
-     * Default: 8MB (8388608 bytes)
-     * Minimum for S3: 5MB (except last part)
-     * Maximum for S3: 5GB
+     * 默认值：8MB（8388608字节）
+     * S3最小值：5MB（最后一个分片除外）
+     * S3最大值：5GB
      */
     private long defaultChunkSize;
     
     /**
-     * Expiration time for pre-signed URLs in minutes.
+     * 预签名URL的过期时间（分钟）。
      * 
-     * Applies to both upload (part URLs) and download URLs.
-     * After expiration, URLs cannot be used and must be regenerated.
+     * 同时适用于上传（分片URL）和下载URL。
+     * 过期后，URL无法使用，必须重新生成。
      * 
-     * Default: 60 minutes
+     * 默认值：60分钟
      * 
-     * Balance security (shorter expiration) with user experience
-     * (longer expiration for slow uploads).
+     * 需要在安全性（较短过期时间）和用户体验（较长过期时间以适应慢速上传）之间取得平衡。
      */
     private int presignedUrlExpirationMinutes;
 }

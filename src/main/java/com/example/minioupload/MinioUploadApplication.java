@@ -4,32 +4,31 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 /**
- * Main Spring Boot application class for MinIO Multipart Upload Service.
+ * MinIO分片上传服务的主Spring Boot应用程序类。
  * 
- * This application provides RESTful APIs for handling large file uploads to MinIO/S3
- * using multipart upload functionality with resumable capabilities.
+ * 此应用程序提供RESTful API，用于使用具有断点续传功能的分片上传处理大文件上传到MinIO/S3。
  * 
- * Key features:
- * - Resumable multipart uploads to MinIO/S3
- * - Pre-signed URL generation for direct client uploads
- * - Upload status tracking and management
- * - Video recording metadata storage in MySQL 8.0
- * - Support for large file uploads with configurable chunk sizes
+ * 主要功能：
+ * - 可恢复的MinIO/S3分片上传
+ * - 用于客户端直接上传的预签名URL生成
+ * - 上传状态跟踪和管理
+ * - MySQL 8.0中的视频录制元数据存储
+ * - 支持具有可配置分片大小的大文件上传
  * 
- * The application uses:
- * - Spring Boot 3.2.0 with Java 17
- * - MySQL 8.0 for persistent storage
- * - AWS SDK v2 for S3-compatible operations
- * - HikariCP for optimized database connection pooling
+ * 应用程序使用：
+ * - Spring Boot 3.2.0和Java 17
+ * - MySQL 8.0用于持久化存储
+ * - AWS SDK v2用于S3兼容操作
+ * - HikariCP用于优化的数据库连接池
  */
 @SpringBootApplication
 public class MinioUploadApplication {
 
     /**
-     * Application entry point.
-     * Initializes the Spring Boot application context and starts the embedded web server.
+     * 应用程序入口点。
+     * 初始化Spring Boot应用程序上下文并启动嵌入式Web服务器。
      * 
-     * @param args command-line arguments passed to the application
+     * @param args 传递给应用程序的命令行参数
      */
     public static void main(String[] args) {
         SpringApplication.run(MinioUploadApplication.class, args);

@@ -5,10 +5,9 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Data Transfer Object for multipart upload initialization response.
+ * 分片上传初始化响应的数据传输对象。
  * 
- * Contains all information the client needs to proceed with uploading
- * file parts to S3/MinIO.
+ * 包含客户端继续上传文件分片到S3/MinIO所需的所有信息。
  */
 @Data
 @NoArgsConstructor
@@ -16,35 +15,35 @@ import lombok.NoArgsConstructor;
 public class InitUploadResponse {
 
     /**
-     * Unique upload session ID from S3/MinIO.
-     * Must be included in all subsequent requests (get URLs, complete, abort).
+     * 来自S3/MinIO的唯一上传会话ID。
+     * 必须包含在所有后续请求中（获取URL、完成、中止）。
      */
     private String uploadId;
 
     /**
-     * S3 object key where the file will be stored.
-     * Format: "uploads/{uuid}/{filename}"
-     * Must be included in all subsequent requests.
+     * 文件将存储的S3对象键。
+     * 格式："uploads/{uuid}/{filename}"
+     * 必须包含在所有后续请求中。
      */
     private String objectKey;
 
     /**
-     * Size of each part/chunk in bytes.
-     * Client should split the file into chunks of this size for upload.
-     * Last chunk may be smaller than this size.
+     * 每个分片/块的大小（字节）。
+     * 客户端应将文件拆分为此大小的块进行上传。
+     * 最后一个块可能小于此大小。
      */
     private long partSize;
 
     /**
-     * Minimum part number (always 1).
-     * S3 part numbers are 1-based.
+     * 最小分片编号（始终为1）。
+     * S3分片编号从1开始。
      */
     private int minPartNumber;
 
     /**
-     * Maximum part number needed to complete the upload.
-     * Calculated as: ceil(fileSize / partSize)
-     * Client should upload parts 1 through maxPartNumber.
+     * 完成上传所需的最大分片编号。
+     * 计算方式：ceil(fileSize / partSize)
+     * 客户端应上传从1到maxPartNumber的分片。
      */
     private int maxPartNumber;
 }

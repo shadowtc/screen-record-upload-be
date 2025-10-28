@@ -6,9 +6,9 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Data Transfer Object for aborting a multipart upload.
+ * 用于中止分片上传的数据传输对象。
  * 
- * Used to cancel an upload and clean up all uploaded parts from S3/MinIO.
+ * 用于取消上传并从S3/MinIO清理所有已上传的分片。
  */
 @Data
 @NoArgsConstructor
@@ -16,15 +16,15 @@ import lombok.NoArgsConstructor;
 public class AbortUploadRequest {
 
     /**
-     * Upload session ID from initialization.
-     * Required field - must not be blank.
+     * 来自初始化的上传会话ID。
+     * 必填字段 - 不能为空。
      */
     @NotBlank(message = "uploadId is required")
     private String uploadId;
 
     /**
-     * S3 object key from initialization.
-     * Required field - must not be blank.
+     * 来自初始化的S3对象键。
+     * 必填字段 - 不能为空。
      */
     @NotBlank(message = "objectKey is required")
     private String objectKey;

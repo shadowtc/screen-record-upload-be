@@ -8,10 +8,9 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Data Transfer Object for initializing a multipart upload.
+ * 用于初始化分片上传的数据传输对象。
  * 
- * This request contains all necessary information to start a new upload session
- * including file metadata and optional upload configuration.
+ * 此请求包含启动新上传会话所需的所有信息，包括文件元数据和可选的上传配置。
  */
 @Data
 @NoArgsConstructor
@@ -19,34 +18,34 @@ import lombok.NoArgsConstructor;
 public class InitUploadRequest {
 
     /**
-     * Original filename of the file to upload.
-     * Required field - must not be blank.
+     * 要上传的文件的原始文件名。
+     * 必填字段 - 不能为空。
      */
     @NotBlank(message = "fileName is required")
     private String fileName;
 
     /**
-     * Total size of the file in bytes.
-     * Required field - must be positive.
-     * Used to calculate the number of parts needed and validate against max file size.
+     * 文件的总大小（字节）。
+     * 必填字段 - 必须为正数。
+     * 用于计算所需的分片数并验证最大文件大小。
      */
     @NotNull(message = "size is required")
     @Positive(message = "size must be positive")
     private Long size;
 
     /**
-     * MIME content type of the file (e.g., "video/mp4").
-     * Required field - must not be blank.
-     * Must start with "video/" for validation to pass.
+     * 文件的MIME内容类型（例如"video/mp4"）。
+     * 必填字段 - 不能为空。
+     * 必须以"video/"开头才能通过验证。
      */
     @NotBlank(message = "contentType is required")
     private String contentType;
 
     /**
-     * Optional custom chunk/part size in bytes.
-     * If not provided, the server's default chunk size will be used.
-     * Minimum: 5MB (S3 requirement)
-     * Maximum: 5GB (S3 limit)
+     * 可选的自定义分片/块大小（字节）。
+     * 如果未提供，将使用服务器的默认分片大小。
+     * 最小值：5MB（S3要求）
+     * 最大值：5GB（S3限制）
      */
     private Long chunkSize;
 }

@@ -13,30 +13,28 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Global exception handler for the entire application.
+ * 整个应用程序的全局异常处理器。
  * 
- * This class centralizes exception handling across all REST controllers,
- * providing consistent error responses to clients. It handles:
- * - Bean validation failures
- * - Business logic validation failures (IllegalArgumentException)
- * - S3/MinIO operation failures
- * - Unexpected runtime exceptions
+ * 此类集中处理所有REST控制器的异常，为客户端提供一致的错误响应。它处理：
+ * - Bean验证失败
+ * - 业务逻辑验证失败（IllegalArgumentException）
+ * - S3/MinIO操作失败
+ * - 意外的运行时异常
  * 
- * All exceptions are logged and transformed into user-friendly error responses
- * with appropriate HTTP status codes.
+ * 所有异常都会被记录并转换为用户友好的错误响应，带有适当的HTTP状态码。
  */
 @RestControllerAdvice
 @Slf4j
 public class GlobalExceptionHandler {
 
     /**
-     * Handles validation exceptions from Jakarta Bean Validation.
+     * 处理来自Jakarta Bean Validation的验证异常。
      * 
-     * Triggered when request body validation fails (e.g., @NotNull, @NotBlank violations).
-     * Returns a map of field names to error messages for all validation failures.
+     * 当请求体验证失败时触发（例如@NotNull、@NotBlank违规）。
+     * 为所有验证失败返回字段名到错误消息的映射。
      * 
-     * @param ex the validation exception containing all validation errors
-     * @return 400 Bad Request with map of field-level error messages
+     * @param ex 包含所有验证错误的验证异常
+     * @return 带有字段级错误消息映射的400 Bad Request
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, String>> handleValidationExceptions(MethodArgumentNotValidException ex) {
@@ -53,13 +51,13 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Handles business logic validation exceptions.
+     * 处理业务逻辑验证异常。
      * 
-     * Triggered when service layer throws IllegalArgumentException for invalid
-     * business rules (e.g., file size too large, invalid content type).
+     * 当服务层为无效的业务规则抛出IllegalArgumentException时触发
+     * （例如文件大小过大、内容类型无效）。
      * 
-     * @param ex the exception containing the business rule violation message
-     * @return 400 Bad Request with error message
+     * @param ex 包含业务规则违规消息的异常
+     * @return 带有错误消息的400 Bad Request
      */
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, String>> handleIllegalArgumentException(IllegalArgumentException ex) {
@@ -71,14 +69,13 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Handles S3/MinIO operation failures.
+     * 处理S3/MinIO操作失败。
      * 
-     * Triggered when AWS SDK operations fail (e.g., network issues, invalid credentials,
-     * bucket not found, insufficient permissions). Extracts detailed error information
-     * from AWS error details.
+     * 当AWS SDK操作失败时触发（例如网络问题、无效凭证、存储桶未找到、权限不足）。
+     * 从AWS错误详情中提取详细的错误信息。
      * 
-     * @param ex the S3 exception from AWS SDK
-     * @return 500 Internal Server Error with S3 error details
+     * @param ex 来自AWS SDK的S3异常
+     * @return 带有S3错误详情的500 Internal Server Error
      */
     @ExceptionHandler(S3Exception.class)
     public ResponseEntity<Map<String, String>> handleS3Exception(S3Exception ex) {
@@ -90,14 +87,13 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Handles all other unexpected exceptions.
+     * 处理所有其他意外异常。
      * 
-     * This is the fallback handler for any exception not explicitly handled by other
-     * methods. Logs the full exception for debugging and returns a generic error message
-     * to avoid exposing internal implementation details.
+     * 这是未被其他方法显式处理的任何异常的后备处理器。
+     * 记录完整的异常以供调试，并返回通用错误消息以避免暴露内部实现细节。
      * 
-     * @param ex the unexpected exception
-     * @return 500 Internal Server Error with generic error message
+     * @param ex 意外异常
+     * @return 带有通用错误消息的500 Internal Server Error
      */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, String>> handleGenericException(Exception ex) {
