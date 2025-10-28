@@ -1,0 +1,150 @@
+{
+  "info": {
+    "name": "MinIO Multipart Upload API",
+    "description": "Collection for testing MinIO multipart upload endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "upload_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "object_key",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Initialize Upload",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "    var jsonData = pm.response.json();",
+              "    pm.collectionVariables.set('upload_id', jsonData.uploadId);",
+              "    pm.collectionVariables.set('object_key', jsonData.objectKey);",
+              "    console.log('Upload ID: ' + jsonData.uploadId);",
+              "    console.log('Object Key: ' + jsonData.objectKey);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"fileName\": \"test-video.mp4\",\n  \"size\": 524288000,\n  \"contentType\": \"video/mp4\",\n  \"chunkSize\": 8388608\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/uploads/init",
+          "host": ["{{base_url}}"],
+          "path": ["api", "uploads", "init"]
+        }
+      }
+    },
+    {
+      "name": "2. Get Presigned URLs",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/uploads/{{upload_id}}/parts?objectKey={{object_key}}&startPartNumber=1&endPartNumber=5",
+          "host": ["{{base_url}}"],
+          "path": ["api", "uploads", "{{upload_id}}", "parts"],
+          "query": [
+            {
+              "key": "objectKey",
+              "value": "{{object_key}}"
+            },
+            {
+              "key": "startPartNumber",
+              "value": "1"
+            },
+            {
+              "key": "endPartNumber",
+              "value": "5"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "3. Get Upload Status",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/uploads/{{upload_id}}/status?objectKey={{object_key}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "uploads", "{{upload_id}}", "status"],
+          "query": [
+            {
+              "key": "objectKey",
+              "value": "{{object_key}}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "4. Complete Upload",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"uploadId\": \"{{upload_id}}\",\n  \"objectKey\": \"{{object_key}}\",\n  \"parts\": [\n    {\n      \"partNumber\": 1,\n      \"eTag\": \"abc123\"\n    },\n    {\n      \"partNumber\": 2,\n      \"eTag\": \"def456\"\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/uploads/complete",
+          "host": ["{{base_url}}"],
+          "path": ["api", "uploads", "complete"]
+        }
+      }
+    },
+    {
+      "name": "5. Abort Upload",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"uploadId\": \"{{upload_id}}\",\n  \"objectKey\": \"{{object_key}}\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/uploads/abort",
+          "host": ["{{base_url}}"],
+          "path": ["api", "uploads", "abort"]
+        }
+      }
+    }
+  ]
+}
