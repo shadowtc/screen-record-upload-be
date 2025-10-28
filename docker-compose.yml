@@ -1,11 +1,36 @@
 version: '3.8'
 
 services:
+  mysql:
+    image: mysql:8.0
+    container_name: minio-upload-mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD:-root123}
+      - MYSQL_DATABASE=${DB_NAME:-minio_upload}
+      - MYSQL_USER=${DB_USERNAME:-minioadmin}
+      - MYSQL_PASSWORD=${DB_PASSWORD:-root123}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - minio-network
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD:-root123}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   app:
     build: .
     ports:
       - "8080:8080"
     environment:
+      - DB_URL=jdbc:mysql://mysql:3306/${DB_NAME:-minio_upload}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      - DB_USERNAME=${DB_USERNAME:-root}
+      - DB_PASSWORD=${DB_PASSWORD:-root123}
       - S3_ENDPOINT=${S3_ENDPOINT:-http://192.168.0.245:9000}
       - S3_ACCESS_KEY=${S3_ACCESS_KEY:-minioadmin}
       - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin123}
@@ -15,6 +40,9 @@ services:
       - UPLOAD_MAX_SIZE=${UPLOAD_MAX_SIZE:-2147483648}
       - UPLOAD_CHUNK_SIZE=${UPLOAD_CHUNK_SIZE:-8388608}
       - PRESIGNED_URL_EXPIRATION=${PRESIGNED_URL_EXPIRATION:-60}
+    depends_on:
+      mysql:
+        condition: service_healthy
     networks:
       - minio-network
     restart: unless-stopped
@@ -22,3 +50,6 @@ services:
 networks:
   minio-network:
     driver: bridge
+
+volumes:
+  mysql-data:

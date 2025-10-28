@@ -1,142 +1,125 @@
 package com.example.minioupload.model;
 
 import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+
 import java.time.LocalDateTime;
 
+/**
+ * Entity class representing a video recording uploaded to S3/MinIO storage.
+ * This entity tracks metadata about uploaded videos including file information,
+ * storage location, upload status, and video properties.
+ * 
+ * Uses MySQL 8.0 as the persistence layer with optimized indexes for common queries.
+ */
 @Entity
-@Table(name = "video_recordings")
+@Table(name = "video_recordings", indexes = {
+    @Index(name = "idx_object_key", columnList = "object_key", unique = true),
+    @Index(name = "idx_user_id", columnList = "user_id"),
+    @Index(name = "idx_status", columnList = "status"),
+    @Index(name = "idx_created_at", columnList = "created_at")
+})
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class VideoRecording {
 
+    /**
+     * Primary key - Auto-generated unique identifier for the video recording
+     */
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "user_id")
+    /**
+     * User ID associated with this video recording
+     * Indexed for efficient user-based queries
+     */
+    @Column(name = "user_id", length = 100)
     private String userId;
 
-    @Column(nullable = false)
+    /**
+     * Original filename of the uploaded video
+     * Required field that stores the name of the video file
+     */
+    @Column(nullable = false, length = 500)
     private String filename;
 
+    /**
+     * Size of the video file in bytes
+     * Required field used for storage tracking and validation
+     */
     @Column(nullable = false)
     private Long size;
 
+    /**
+     * Duration of the video in seconds
+     * Optional field for video playback information
+     */
     private Long duration;
 
+    /**
+     * Video width in pixels
+     * Optional field for video resolution information
+     */
     private Integer width;
 
+    /**
+     * Video height in pixels
+     * Optional field for video resolution information
+     */
     private Integer height;
 
+    /**
+     * Video codec information (e.g., H.264, VP9)
+     * Optional field for video encoding details
+     */
+    @Column(length = 50)
     private String codec;
 
-    @Column(name = "object_key", nullable = false, unique = true)
+    /**
+     * S3/MinIO object key - unique storage identifier
+     * Required and unique field that represents the full path in object storage
+     * Indexed for efficient lookups when accessing stored videos
+     */
+    @Column(name = "object_key", nullable = false, unique = true, length = 1000)
     private String objectKey;
 
-    @Column(nullable = false)
+    /**
+     * Upload status of the video (e.g., COMPLETED, FAILED, IN_PROGRESS)
+     * Required field tracked throughout the upload lifecycle
+     * Indexed for efficient status-based queries
+     */
+    @Column(nullable = false, length = 50)
     private String status;
 
+    /**
+     * Checksum/ETag of the uploaded file for integrity verification
+     * Stores the S3 ETag returned after successful upload
+     */
+    @Column(length = 255)
     private String checksum;
 
-    @Column(name = "created_at", nullable = false)
+    /**
+     * Timestamp when the record was created
+     * Automatically set on entity creation
+     * Indexed for efficient time-based queries and sorting
+     */
+    @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    /**
+     * JPA lifecycle callback - executed before entity is persisted to database
+     * Automatically sets the creation timestamp
+     */
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
-    }
-
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
-
-    public String getUserId() {
-        return userId;
-    }
-
-    public void setUserId(String userId) {
-        this.userId = userId;
-    }
-
-    public String getFilename() {
-        return filename;
-    }
-
-    public void setFilename(String filename) {
-        this.filename = filename;
-    }
-
-    public Long getSize() {
-        return size;
-    }
-
-    public void setSize(Long size) {
-        this.size = size;
-    }
-
-    public Long getDuration() {
-        return duration;
-    }
-
-    public void setDuration(Long duration) {
-        this.duration = duration;
-    }
-
-    public Integer getWidth() {
-        return width;
-    }
-
-    public void setWidth(Integer width) {
-        this.width = width;
-    }
-
-    public Integer getHeight() {
-        return height;
-    }
-
-    public void setHeight(Integer height) {
-        this.height = height;
-    }
-
-    public String getCodec() {
-        return codec;
-    }
-
-    public void setCodec(String codec) {
-        this.codec = codec;
-    }
-
-    public String getObjectKey() {
-        return objectKey;
-    }
-
-    public void setObjectKey(String objectKey) {
-        this.objectKey = objectKey;
-    }
-
-    public String getStatus() {
-        return status;
-    }
-
-    public void setStatus(String status) {
-        this.status = status;
-    }
-
-    public String getChecksum() {
-        return checksum;
-    }
-
-    public void setChecksum(String checksum) {
-        this.checksum = checksum;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
     }
 }
