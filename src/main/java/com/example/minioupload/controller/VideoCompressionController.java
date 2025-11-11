@@ -11,7 +11,6 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * 视频压缩控制器
@@ -109,34 +108,43 @@ public class VideoCompressionController {
      * {
      *   "jobId": "550e8400-e29b-41d4-a716-446655440000",
      *   "success": true,
-     *   "status": "processing"
+     *   "status": "SUBMITTED"
      * }
      * 
      * 然后通过 GET /api/video/progress/{jobId} 查询进度
      * 
      * @param request 视频压缩请求对象
-     * @return CompletableFuture<ResponseEntity<VideoCompressionResponse>> 异步响应
-     *         - HTTP 200：任务已提交
+     * @return ResponseEntity<VideoCompressionResponse> 异步响应（立即返回）
+     *         - HTTP 202：任务已提交
+     *         - HTTP 400：请求参数无效
      *         - HTTP 500：提交失败
      */
     @PostMapping("/compress/async")
-    public CompletableFuture<ResponseEntity<VideoCompressionResponse>> compressVideoAsync(
+    public ResponseEntity<VideoCompressionResponse> compressVideoAsync(
             @Valid @RequestBody VideoCompressionRequest request) {
         
         log.info("Received async video compression request for file: {}", request.getInputFilePath());
         
-        // 提交异步任务并返回完成后的结果
-        return videoCompressionService.compressVideoAsync(request)
-            .thenApply(ResponseEntity::ok)
-            .exceptionally(throwable -> {
-                log.error("Async video compression failed", throwable);
-                VideoCompressionResponse errorResponse = VideoCompressionResponse.builder()
-                    .success(false)
-                    .errorMessage(throwable.getCause() != null ? 
-                        throwable.getCause().getMessage() : throwable.getMessage())
-                    .build();
-                return ResponseEntity.internalServerError().body(errorResponse);
-            });
+        try {
+            // 提交异步任务（不等待完成）
+            String jobId = videoCompressionService.submitCompressionJob(request);
+            
+            // 立即返回，包含任务ID供客户端轮询
+            VideoCompressionResponse response = VideoCompressionResponse.builder()
+                .jobId(jobId)
+                .success(true)
+                .status("SUBMITTED")
+                .build();
+            
+            return ResponseEntity.accepted().body(response);
+        } catch (Exception e) {
+            log.error("Failed to submit async video compression", e);
+            VideoCompressionResponse errorResponse = VideoCompressionResponse.builder()
+                .success(false)
+                .errorMessage(e.getMessage())
+                .build();
+            return ResponseEntity.internalServerError().body(errorResponse);
+        }
     }
     
     /**
