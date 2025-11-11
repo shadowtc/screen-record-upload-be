@@ -13,13 +13,13 @@ spring:
     # useSSL=false：不使用SSL（开发环境）
     # allowPublicKeyRetrieval=true：允许RSA公钥检索
     # serverTimezone=UTC：服务器时区设置
-    url: ${DB_URL:jdbc:mysql://localhost:3306/minio_upload?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
+    url: ${DB_URL:jdbc:mysql://192.168.0.240:3316/minio_upload?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
     # MySQL JDBC驱动类
     driver-class-name: com.mysql.cj.jdbc.Driver
     # 数据库用户名
     username: ${DB_USERNAME:root}
     # 数据库密码
-    password: ${DB_PASSWORD:root123}
+    password: ${DB_PASSWORD:123456}
     
     # HikariCP连接池配置
     # HikariCP是当前最快的JDBC连接池实现
@@ -149,8 +149,8 @@ video:
     # 临时目录路径
     # 存储压缩中和已完成的视频文件
     # Linux/Docker：/tmp/video-compression
-    # Windows：C:\temp\video-compression
-    temp-directory: ${VIDEO_TEMP_DIR:/tmp/video-compression}
+    # Windows：D://ruoyi/compression
+    temp-directory: ${VIDEO_TEMP_DIR:D://ruoyi/compression}
     
     # 最大并发压缩任务数
     # 超过此数值的新请求将被拒绝或排队
