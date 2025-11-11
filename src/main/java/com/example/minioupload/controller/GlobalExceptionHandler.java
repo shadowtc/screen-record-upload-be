@@ -1,6 +1,7 @@
 package com.example.minioupload.controller;
 
 import lombok.extern.slf4j.Slf4j;
+import org.apache.catalina.connector.ClientAbortException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -84,6 +85,21 @@ public class GlobalExceptionHandler {
         Map<String, String> error = new HashMap<>();
         error.put("error", "S3 operation failed: " + ex.awsErrorDetails().errorMessage());
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+    }
+
+    /**
+     * 处理客户端连接中止异常。
+     * 
+     * 当客户端在服务器发送响应之前断开连接时触发（例如用户取消请求、浏览器超时、网络中断）。
+     * 这通常发生在长时间运行的操作（如视频压缩、大文件上传）中。
+     * 
+     * 这不是服务器错误，只需记录信息级别日志。不返回响应，因为客户端已断开连接。
+     * 
+     * @param ex 客户端中止异常
+     */
+    @ExceptionHandler(ClientAbortException.class)
+    public void handleClientAbortException(ClientAbortException ex) {
+        log.info("Client aborted connection: {}", ex.getMessage());
     }
 
     /**
