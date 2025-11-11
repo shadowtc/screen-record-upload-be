@@ -1,143 +1,349 @@
+# ============================================================
+# Spring应用主配置
+# ============================================================
 spring:
   application:
+    # 应用名称，用于Spring Boot管理和监控
     name: minio-multipart-upload
+  
+  # 数据源配置
   datasource:
+    # JDBC连接字符串
+    # 可通过环境变量DB_URL覆盖
+    # useSSL=false：不使用SSL（开发环境）
+    # allowPublicKeyRetrieval=true：允许RSA公钥检索
+    # serverTimezone=UTC：服务器时区设置
     url: ${DB_URL:jdbc:mysql://localhost:3306/minio_upload?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
+    # MySQL JDBC驱动类
     driver-class-name: com.mysql.cj.jdbc.Driver
+    # 数据库用户名
     username: ${DB_USERNAME:root}
+    # 数据库密码
     password: ${DB_PASSWORD:root123}
+    
+    # HikariCP连接池配置
+    # HikariCP是当前最快的JDBC连接池实现
     hikari:
+      # 最大连接池大小
+      # 公式建议：数据库最大连接数 * 2
+      # 每个数据库连接消耗约2MB内存
       maximum-pool-size: 10
+      # 最小空闲连接数
+      # 连接池初始化时创建此数量的连接
       minimum-idle: 5
+      # 连接超时时间（毫秒）
+      # 获取连接的最大等待时间
       connection-timeout: 30000
+      # 空闲连接超时时间（毫秒）
+      # 10分钟，超过此时间的空闲连接将被关闭
       idle-timeout: 600000
+      # 连接最大生命周期（毫秒）
+      # 30分钟，即使连接未被使用也会被关闭并重建
       max-lifetime: 1800000
+  
+  # JPA/Hibernate ORM配置
   jpa:
     hibernate:
+      # DDL自动更新策略
+      # update：首次启动时自动创建表，后续只更新表结构（不删除字段）
+      # 其他值：create（每次删除重建），create-drop（运行时创建，关闭时删除），validate（仅验证）
       ddl-auto: update
+    # 是否在日志中打印SQL语句
+    # 开发环境设为true便于调试，生产环境设为false提高性能
     show-sql: true
+    
     properties:
       hibernate:
+        # Hibernate方言，针对具体数据库的SQL方言
+        # MySQL8Dialect：针对MySQL 8.0+的优化
         dialect: org.hibernate.dialect.MySQL8Dialect
+        # 是否格式化SQL输出（让日志SQL更易读）
         format_sql: true
+        # 是否生成SQL注释（便于日志中理解SQL用途）
         use_sql_comments: true
+        
         jdbc:
+          # JDBC批处理大小
+          # 设置为20表示20条INSERT/UPDATE/DELETE语句批量执行
+          # 提高性能但增加内存消耗
           batch_size: 20
+        
+        # 是否为INSERT操作排序（降低数据库锁等待）
         order_inserts: true
+        # 是否为UPDATE操作排序
         order_updates: true
 
+# ============================================================
+# MinIO S3存储配置
+# ============================================================
 s3:
+  # MinIO服务端点
+  # 支持任何S3兼容的存储服务（AWS S3, 阿里云OSS等）
+  # 格式：http://host:port 或 https://host:port
   endpoint: ${S3_ENDPOINT:http://192.168.0.245:9000}
+  # S3访问密钥（Access Key ID）
   access-key: ${S3_ACCESS_KEY:minioadmin}
+  # S3密钥（Secret Access Key）
   secret-key: ${S3_SECRET_KEY:minioadmin123}
+  # 默认存储桶名称
+  # 如果此值为空，需要在上传请求中指定存储桶
   bucket: ${S3_BUCKET:remote-consent}
+  # 存储区域/数据中心区域代码
+  # AWS示例：us-east-1, us-west-2, eu-west-1
+  # MinIO通常使用：us-east-1
   region: ${S3_REGION:us-east-1}
+  # 是否使用路径风格访问
+  # true：http://endpoint/bucket/key（MinIO默认使用）
+  # false：http://bucket.endpoint/key（AWS S3风格）
   path-style-access: ${S3_PATH_STYLE:true}
 
+# ============================================================
+# 文件上传配置
+# ============================================================
 upload:
+  # 单个文件最大大小限制（字节）
+  # 默认值：2147483648（2GB）
+  # 建议值：
+  # - 100MB (104857600)：适合一般Web应用
+  # - 500MB (524288000)：适合中等文件
+  # - 1GB (1073741824)：适合大型文件
+  # - 2GB (2147483648)：适合专业应用
   max-file-size: ${UPLOAD_MAX_SIZE:2147483648}
+  
+  # 分块上传的块大小（字节）
+  # 默认值：8388608（8MB）
+  # 影响因素：
+  # - 网络带宽：块越小，重试次数可能越多
+  # - 内存消耗：块越大，单次上传消耗内存越多
+  # 建议值：4-16MB（大多数场景8MB最优）
   default-chunk-size: ${UPLOAD_CHUNK_SIZE:8388608}
+  
+  # 预签名URL过期时间（分钟）
+  # 默认值：60（1小时）
+  # 控制预签名URL的有效期
+  # 过短：客户端可能在传输中超时
+  # 过长：安全风险增加
+  # 建议值：60-1440（1小时到1天）
   presigned-url-expiration-minutes: ${PRESIGNED_URL_EXPIRATION:60}
 
+# ============================================================
+# 服务器配置
+# ============================================================
 server:
+  # 监听端口号
+  # REST API通过此端口访问
+  # Docker环境中通过端口映射暴露
   port: 8080
 
-# Video Compression Configuration
+# ============================================================
+# 视频压缩服务配置
+# ============================================================
+# 基于JavaCV和FFmpeg的视频压缩处理
+# 支持多种预设、自定义参数和实时进度追踪
 video:
   compression:
+    # 是否启用视频压缩功能
+    # 设为false时所有压缩接口将返回功能禁用错误
     enabled: true
+    
+    # 临时目录路径
+    # 存储压缩中和已完成的视频文件
+    # Linux/Docker：/tmp/video-compression
+    # Windows：C:\temp\video-compression
     temp-directory: ${VIDEO_TEMP_DIR:/tmp/video-compression}
+    
+    # 最大并发压缩任务数
+    # 超过此数值的新请求将被拒绝或排队
+    # 根据CPU核心数和内存调整：
+    # - 2CPU + 4GB：2-3个任务
+    # - 4CPU + 8GB：4-6个任务
     max-concurrent-jobs: ${VIDEO_MAX_JOBS:2}
+    
+    # 单个视频最大文件大小限制（字节）
+    # 默认值：1073741824（1GB）
+    # 超过此大小的文件将被拒绝
     max-file-size: ${VIDEO_MAX_SIZE:1073741824}
+    
+    # 单个压缩任务超时时间（秒）
+    # 默认值：300（5分钟）
+    # 超过此时间未完成的任务将被终止
     timeout-seconds: ${VIDEO_TIMEOUT:300}
     
+    # 压缩预设定义
+    # 包含多个预定义的参数组合，用于不同场景
     presets:
       profiles:
+        # ===== 高质量预设 =====
+        # 适用场景：重要会议录制、电影级内容、长期存档
+        # 特点：最大文件大小，最长编码时间，最好的视觉质量
+        # 编码时间：1GB视频约30-60分钟
         high-quality:
+          # 预设显示名称
           name: "High Quality"
+          # 预设描述
           description: "Best quality with moderate compression"
+          # 视频比特率（bps），范围5M是高质量值
           video-bitrate: 5000000
+          # 音频比特率（bps）
           audio-bitrate: 192000
+          # 输出分辨率预设名称（引用resolution配置中的值）
           resolution: "1080p"
+          # 视频编码器（libx264：H.264编码）
           codec: "libx264"
+          # 编码器预设（slow：较慢编码，更好压缩效果）
           preset: "slow"
+          # 恒定质量因子（18：高质量）
           crf: 18
+          # 两遍编码（true：更好压缩效果但需要2倍时间）
           two-pass: true
           
+        # ===== 平衡预设 =====
+        # 适用场景：日常视频、网络分享、一般存储
+        # 特点：文件大小和质量的均衡
+        # 编码时间：1GB视频约15-30分钟
         balanced:
           name: "Balanced"
           description: "Good balance between quality and size"
+          # 2.5M：中等码率
           video-bitrate: 2500000
           audio-bitrate: 128000
           resolution: "720p"
           codec: "libx264"
+          # medium：平衡编码速度和质量
           preset: "medium"
+          # 23：默认的通用质量值
           crf: 23
+          # 单遍编码，更快
           two-pass: false
           
+        # ===== 高压缩预设 =====
+        # 适用场景：网络传输、移动设备、存储空间有限
+        # 特点：最小文件大小，快速编码，质量下降明显
+        # 编码时间：1GB视频约5-10分钟
         high-compression:
           name: "High Compression"
           description: "Maximum compression with acceptable quality"
+          # 1M：低码率，更小的文件
           video-bitrate: 1000000
           audio-bitrate: 96000
           resolution: "480p"
           codec: "libx264"
+          # fast：快速编码，压缩效果一般
           preset: "fast"
+          # 28：中低质量
           crf: 28
           two-pass: false
           
+        # ===== 屏幕录制优化预设 =====
+        # 适用场景：屏幕录制、在线教学、代码演示
+        # 特点：针对文字和界面内容优化
+        # 编码时间：1GB视频约10-20分钟
         screen-recording:
           name: "Screen Recording Optimized"
           description: "Optimized for screen recording content"
+          # 2M：足够清晰显示文字内容
           video-bitrate: 2000000
           audio-bitrate: 128000
           resolution: "1080p"
           codec: "libx264"
+          # medium：平衡速度和质量
           preset: "medium"
+          # 20：高质量，保持细节清晰
           crf: 20
           two-pass: false
     
+    # 编码默认配置
+    # 为未指定的参数提供默认值
     encoding:
+      # 默认视频编码器
+      # libx264：H.264编码，广泛支持，默认首选
+      # libx265：H.265编码，更高压缩率但兼容性较差
       default-codec: "libx264"
+      
+      # 默认编码器预设（控制编码速度）
+      # ultrafast（最快）< ... < medium（默认）< ... < veryslow（最慢）
+      # 每级差异约10-15%的编码时间
       default-preset: "medium"
+      
+      # 默认CRF值（恒定质量因子）
+      # 范围：0-51
+      # 23：通用默认值，被视为视觉上无损的最小值
+      # 18-20：高质量（存档）
+      # 25-28：平衡方案
+      # 29+：质量下降明显
       default-crf: 23
+      
+      # 默认音频比特率（bps）
+      # 128k（128000）：标准值，适合大多数场景
+      # 64k：低质量，仅用于语音
+      # 192k：高质量，流媒体
+      # 320k：最高质量，仅特殊情况
       default-audio-bitrate: 128000
+      
+      # 默认音频编码器
+      # aac：高效且广泛支持（推荐）
+      # mp3：较旧但兼容性极好
+      # libopus：新编码器，更高效
       default-audio-codec: "aac"
+      
+      # 默认编码线程数
+      # 0：自动检测（推荐）
+      # 1：单线程（调试）
+      # 2-8：固定线程数
+      # CPU核心数：最大化性能
       default-threads: 0
       
+    # 分辨率预设定义
+    # 包含常用分辨率及其推荐参数
     resolution:
       presets:
+        # ===== 标清（SD）=====
+        # 适用：网络视频、低带宽场景、移动设备
         480p:
           name: "480p (SD)"
           width: 854
           height: 480
+          # 1M码率足以显示清晰的480p视频
           recommended-bitrate: 1000000
           description: "Standard Definition"
           
+        # ===== 高清（HD）=====
+        # 适用：YouTube标清、网络直播、PC监控
         720p:
           name: "720p (HD)"
           width: 1280
           height: 720
+          # 2.5M码率可获得不错的720p质量
           recommended-bitrate: 2500000
           description: "High Definition"
           
+        # ===== 全高清（Full HD）=====
+        # 适用：蓝光级质量、专业视频、高清直播
         1080p:
           name: "1080p (Full HD)"
           width: 1920
           height: 1080
+          # 5M码率可获得优秀的1080p质量
           recommended-bitrate: 5000000
           description: "Full High Definition"
           
+        # ===== 2K分辨率 =====
+        # 适用：高端专业视频、电影级制作、档案存储
         1440p:
           name: "1440p (2K)"
           width: 2560
           height: 1440
+          # 8M码率支持2K的高质量
           recommended-bitrate: 8000000
           description: "2K Resolution"
           
+        # ===== 4K超高清（UHD）=====
+        # 适用：电影级内容、8K电视源、专业摄像
         4k:
           name: "4K (UHD)"
           width: 3840
           height: 2160
+          # 15M码率才能保证4K的质量
           recommended-bitrate: 15000000
           description: "Ultra High Definition"
+
