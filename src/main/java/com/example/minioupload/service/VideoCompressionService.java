@@ -190,32 +190,44 @@ public class VideoCompressionService {
      * 
      * @throws Exception FFmpeg处理异常
      */
-    private void compressVideoFile(String inputPath, String outputPath, 
-                                 VideoCompressionSettings settings, String jobId) throws Exception {
-        
-        try (FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(inputPath);
-             FFmpegFrameRecorder recorder = new FFmpegFrameRecorder(outputPath, 
-                     grabber.getAudioChannels())) {
-            
-            // 启动帧读取器，开始读取原始视频
+    private void compressVideoFile(String inputPath, String outputPath,
+                                  VideoCompressionSettings settings, String jobId) throws Exception {
+
+        FFmpegFrameGrabber grabber = null;
+        FFmpegFrameRecorder recorder = null;
+
+        try {
+            grabber = new FFmpegFrameGrabber(inputPath);
             grabber.start();
-            
+
+            // 获取输入视频的音频通道数
+            int audioChannels = grabber.getAudioChannels();
+
+            // 创建录制器，仅在输入有音频时才设置音频通道
+            recorder = new FFmpegFrameRecorder(outputPath, audioChannels > 0 ? audioChannels : 0);
+
             // 设置录制器的视频尺寸
             recorder.setImageWidth(grabber.getImageWidth());
             recorder.setImageHeight(grabber.getImageHeight());
-            
+
             // 配置视频编码器参数
             // 使用标准编码器常量
             recorder.setVideoCodec(avcodec.AV_CODEC_ID_H264);
-            recorder.setAudioCodec(avcodec.AV_CODEC_ID_AAC);
             recorder.setVideoBitrate(settings.getVideoBitrate());
-            recorder.setAudioBitrate(settings.getAudioBitrate());
             // CRF：0-51，建议值18-28，越低质量越好
             recorder.setVideoQuality(settings.getCrf());
             // 设置像素格式为YUV420P，这是最常见的输出格式
             recorder.setPixelFormat(avutil.AV_PIX_FMT_YUV420P);
             recorder.setFrameRate(grabber.getVideoFrameRate());
-            
+
+            // 只在输入有音频时才配置音频编码参数
+            if (audioChannels > 0) {
+                recorder.setAudioCodec(avcodec.AV_CODEC_ID_AAC);
+                recorder.setAudioBitrate(settings.getAudioBitrate());
+                recorder.setAudioChannels(audioChannels);
+                recorder.setSampleRate(grabber.getSampleRate());
+            }
+
             // 设置输出分辨率，如果指定了则进行缩放，否则保持原始分辨率
             if (settings.getWidth() > 0 && settings.getHeight() > 0) {
                 recorder.setImageWidth(settings.getWidth());
@@ -224,38 +236,56 @@ public class VideoCompressionService {
                 recorder.setImageWidth(grabber.getImageWidth());
                 recorder.setImageHeight(grabber.getImageHeight());
             }
-            
+
             // 设置编码器预设(ultrafast-veryslow)，控制编码速度和压缩效果的平衡
             recorder.setVideoOption("preset", settings.getPreset());
-            
+
             // 设置编码线程数，0表示自动检测
             recorder.setVideoOption("threads", String.valueOf(settings.getThreads()));
-            
+
             // 启动帧记录器，准备开始输出
             recorder.start();
-            
+
             // 计算总帧数用于进度计算
             long totalFrames = grabber.getLengthInVideoFrames();
             AtomicLong processedFrames = new AtomicLong(0);
-            
+
             // 逐帧读取和编码处理
             Frame frame;
             while ((frame = grabber.grab()) != null) {
-                // 将读取的帧写入编码器
-                recorder.record(frame);
-                
-                // 实时更新压缩进度（百分比）
-                if (totalFrames > 0) {
-                    double progress = (double) processedFrames.incrementAndGet() / totalFrames * 100;
-                    progressMap.put(jobId, new CompressionProgress(jobId, progress, "Compressing..."));
+                // 只记录视频帧，音频帧仅在配置了音频时才记录
+                if (frame.image != null || (audioChannels > 0 && frame.samples != null)) {
+                    recorder.record(frame);
+
+                    // 仅在处理视频帧时更新进度
+                    if (frame.image != null && totalFrames > 0) {
+                        double progress = (double) processedFrames.incrementAndGet() / totalFrames * 100;
+                        progressMap.put(jobId, new CompressionProgress(jobId, progress, "Compressing..."));
+                    }
                 }
             }
-            
+
             // 标记压缩完成，进入最终化阶段
             progressMap.put(jobId, new CompressionProgress(jobId, 100.0, "Finalizing..."));
-            
+
         } catch (Exception e) {
             throw new RuntimeException("Video compression failed", e);
+        } finally {
+            // 确保资源被正确释放
+            if (recorder != null) {
+                try {
+                    recorder.close();
+                } catch (Exception e) {
+                    log.warn("Failed to close recorder", e);
+                }
+            }
+            if (grabber != null) {
+                try {
+                    grabber.close();
+                } catch (Exception e) {
+                    log.warn("Failed to close grabber", e);
+                }
+            }
         }
     }
     
