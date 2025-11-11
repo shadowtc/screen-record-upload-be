@@ -51,7 +51,90 @@ public class VideoCompressionService {
     private final ConcurrentHashMap<String, CompressionProgress> progressMap = new ConcurrentHashMap<>();
     
     /**
-     * 异步视频压缩方法
+     * 提交异步视频压缩任务
+     * 
+     * 提交视频压缩任务到异步线程池，立即返回任务ID。不会阻塞调用线程。
+     * 客户端应通过轮询 getCompressionProgress 来获取任务状态。
+     * 
+     * @param request 视频压缩请求对象，包含输入文件路径和压缩参数
+     * @return String 压缩任务的唯一标识符，用于后续进度查询
+     * 
+     * @see VideoCompressionRequest
+     * @see #getCompressionProgress(String)
+     */
+    public String submitCompressionJob(VideoCompressionRequest request) {
+        // 生成任务ID
+        String jobId = UUID.randomUUID().toString();
+        
+        // 初始化进度跟踪
+        CompressionProgress progress = new CompressionProgress(jobId, 0.0, "Submitted, waiting to start...");
+        progressMap.put(jobId, progress);
+        
+        // 异步执行压缩任务
+        compressVideoAsyncInternal(request, jobId);
+        
+        log.info("Compression job submitted: {} for file: {}", jobId, request.getInputFilePath());
+        return jobId;
+    }
+    
+    /**
+     * 内部异步视频压缩方法
+     * 
+     * 将视频压缩操作提交到独立的线程池中异步执行，避免阻塞主请求线程。
+     * 适用于大文件或长时间运行的压缩任务。
+     * 
+     * @param request 视频压缩请求对象，包含输入文件路径和压缩参数
+     * @param jobId 压缩任务的唯一标识符
+     */
+    @Async("videoCompressionExecutor")
+    private void compressVideoAsyncInternal(VideoCompressionRequest request, String jobId) {
+        try {
+            log.info("Starting video compression job: {} for file: {}", jobId, request.getInputFilePath());
+            
+            // Validate input file
+            Path inputPath = Paths.get(request.getInputFilePath());
+            if (!Files.exists(inputPath)) {
+                throw new IllegalArgumentException("Input file does not exist: " + request.getInputFilePath());
+            }
+            
+            // Create output path
+            String outputFileName = generateOutputFileName(request.getInputFilePath(), request.getPreset());
+            Path outputPath = Paths.get(properties.getTempDirectory(), outputFileName);
+            Files.createDirectories(outputPath.getParent());
+            
+            // Update progress
+            progressMap.put(jobId, new CompressionProgress(jobId, 0.0, "Starting compression..."));
+            
+            // Get video info
+            VideoInfo videoInfo = getVideoInfo(request.getInputFilePath());
+            
+            // Apply compression settings
+            VideoCompressionSettings settings = applyCompressionSettings(request, videoInfo);
+            
+            // Perform compression
+            long startTime = System.currentTimeMillis();
+            compressVideoFile(inputPath.toString(), outputPath.toString(), settings, jobId);
+            long compressionTime = System.currentTimeMillis() - startTime;
+            
+            // Get compressed video info
+            VideoInfo compressedInfo = getVideoInfo(outputPath.toString());
+            
+            // Mark as complete
+            progressMap.put(jobId, new CompressionProgress(jobId, 100.0, "Completed"));
+            
+            log.info("Video compression completed successfully. Job: {}, Output: {}", jobId, outputPath);
+        } catch (Exception e) {
+            log.error("Video compression failed for job: {}", jobId, e);
+            progressMap.put(jobId, new CompressionProgress(jobId, -1.0, "Error: " + e.getMessage()));
+        } finally {
+            // Clean up progress after 60 minutes
+            CompletableFuture.delayedExecutor(60, java.util.concurrent.TimeUnit.MINUTES)
+                .execute(() -> progressMap.remove(jobId));
+        }
+    }
+    
+    /**
+     * 异步视频压缩方法（兼容旧版本）
      * 
      * 将视频压缩操作提交到独立的线程池中异步执行，避免阻塞主请求线程。
      * 适用于大文件或长时间运行的压缩任务。
