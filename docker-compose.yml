@@ -1,72 +1,176 @@
+# Docker Compose配置文件
+# 用于本地开发和生产部署
+# 
+# 使用方式：
+# 1. docker-compose up -d              启动所有服务
+# 2. docker-compose down               停止所有服务
+# 3. docker-compose logs -f app        查看应用日志
+# 4. docker-compose ps                 查看服务状态
+
 version: '3.8'
 
 services:
+  # MySQL数据库服务
   mysql:
     image: mysql:8.0
     container_name: minio-upload-mysql
+    
+    # 环境变量配置
+    # 支持通过.env文件或命令行覆盖默认值
     environment:
+      # 根目录密码
       - MYSQL_ROOT_PASSWORD=${DB_PASSWORD:-root123}
+      # 创建的数据库名
       - MYSQL_DATABASE=${DB_NAME:-minio_upload}
+      # 创建的用户名
       - MYSQL_USER=${DB_USERNAME:-minioadmin}
+      # 用户密码
       - MYSQL_PASSWORD=${DB_PASSWORD:-root123}
+    
+    # 端口映射
+    # 宿主机:容器内
+    # 允许外部通过3306端口访问MySQL
     ports:
       - "3306:3306"
+    
+    # 数据卷映射
+    # mysql-data：持久化数据卷，容器删除后数据不丢失
     volumes:
       - mysql-data:/var/lib/mysql
+    
+    # 网络配置
     networks:
       - minio-network
+    
+    # 重启策略
+    # unless-stopped：除非被手动停止，否则总是重启
     restart: unless-stopped
+    
+    # MySQL启动参数
+    # 配置认证、字符集和排序规则，确保UTF-8完全支持
     command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    
+    # 健康检查
+    # 定期检查MySQL是否正常工作
+    # 应用启动前会等待此服务健康
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD:-root123}"]
+      # 检查间隔时间
       interval: 10s
+      # 单次检查超时时间
       timeout: 5s
+      # 连续失败次数达到此值才认为服务不健康
       retries: 5
 
+  # Spring Boot应用服务
   app:
+    # 从当前目录的Dockerfile构建镜像
     build: .
+    
+    # 端口映射
+    # 访问地址：http://localhost:8080
     ports:
       - "8080:8080"
+    
+    # 环境变量配置
     environment:
+      # ===== 数据库配置 =====
+      # JDBC连接字符串
       - DB_URL=jdbc:mysql://mysql:3306/${DB_NAME:-minio_upload}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      # 数据库用户名
       - DB_USERNAME=${DB_USERNAME:-root}
+      # 数据库密码
       - DB_PASSWORD=${DB_PASSWORD:-root123}
+      
+      # ===== MinIO S3存储配置 =====
+      # MinIO服务端点地址
       - S3_ENDPOINT=${S3_ENDPOINT:-http://192.168.0.245:9000}
+      # S3访问密钥
       - S3_ACCESS_KEY=${S3_ACCESS_KEY:-minioadmin}
+      # S3密钥
       - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin123}
+      # 默认存储桶名称
       - S3_BUCKET=${S3_BUCKET:-remote-consent}
+      # 存储区域
       - S3_REGION=${S3_REGION:-us-east-1}
+      # 是否使用路径风格访问（MinIO通常需要true）
       - S3_PATH_STYLE=${S3_PATH_STYLE:-true}
+      
+      # ===== 文件上传配置 =====
+      # 最大上传文件大小（字节）
+      # 默认值：2147483648（2GB）
       - UPLOAD_MAX_SIZE=${UPLOAD_MAX_SIZE:-2147483648}
+      # 分块上传的块大小（字节）
+      # 默认值：8388608（8MB）
       - UPLOAD_CHUNK_SIZE=${UPLOAD_CHUNK_SIZE:-8388608}
+      # 预签名URL过期时间（分钟）
+      # 默认值：60分钟
       - PRESIGNED_URL_EXPIRATION=${PRESIGNED_URL_EXPIRATION:-60}
-      # Video compression environment variables
+      
+      # ===== 视频压缩配置 =====
+      # 临时目录路径（容器内路径）
+      # 推荐值：/tmp/video-compression
       - VIDEO_TEMP_DIR=${VIDEO_TEMP_DIR:-/tmp/video-compression}
+      # 最大并发压缩任务数
+      # 推荐值：2-4（根据CPU核心数调整）
       - VIDEO_MAX_JOBS=${VIDEO_MAX_JOBS:-2}
+      # 单个视频最大文件大小（字节）
+      # 默认值：1073741824（1GB）
       - VIDEO_MAX_SIZE=${VIDEO_MAX_SIZE:-1073741824}
+      # 压缩任务超时时间（秒）
+      # 默认值：300（5分钟）
       - VIDEO_TIMEOUT=${VIDEO_TIMEOUT:-300}
+    
+    # 依赖关系
+    # 应用启动前必须等待MySQL健康
     depends_on:
       mysql:
+        # 等待服务健康而不仅仅是启动
         condition: service_healthy
+    
+    # 网络配置
     networks:
       - minio-network
+    
+    # 重启策略
     restart: unless-stopped
-    # Resource allocation for video compression
+    
+    # 资源限制配置
+    # 确保视频压缩等重操作有足够资源
     deploy:
       resources:
+        # 硬限制：容器不能超过此资源
         limits:
+          # CPU核心数：2个完整核心
           cpus: '2.0'
+          # 内存限制：4GB
           memory: 4G
+        # 软预留：Docker优先分配此资源
         reservations:
+          # 预留1个CPU核心
           cpus: '1.0'
+          # 预留2GB内存
           memory: 2G
+    
+    # 数据卷映射
+    # 挂载临时视频压缩目录，确保容器重启后数据持久化
     volumes:
+      # 视频临时文件卷
       - video-temp:/tmp/video-compression
 
+# 网络配置
+# 创建自定义网桥网络供容器间通信
 networks:
   minio-network:
     driver: bridge
 
+# 数据卷配置
+# 定义命名卷供服务使用
 volumes:
+  # MySQL数据卷，存储数据库文件
+  # 容器删除后数据仍保留
   mysql-data:
+  # 视频压缩临时文件卷
+  # 存储压缩中和已完成的视频文件
   video-temp:
+
