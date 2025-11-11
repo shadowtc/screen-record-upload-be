@@ -1,0 +1,49 @@
+# 测试环境配置文件
+# 使用本地文件系统模拟S3存储，用于单元测试和集成测试
+
+spring:
+  application:
+    name: minio-multipart-upload-test
+  
+  # 使用H2内存数据库进行测试
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+    
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+        format_sql: true
+
+# 测试用的S3配置（使用LocalStack或模拟服务）
+s3:
+  endpoint: ${S3_ENDPOINT:http://localhost:4566}
+  access-key: ${S3_ACCESS_KEY:test}
+  secret-key: ${S3_SECRET_KEY:test}
+  bucket: ${S3_BUCKET:test-bucket}
+  region: ${S3_REGION:us-east-1}
+  path-style-access: ${S3_PATH_STYLE:true}
+
+# 测试用的上传配置
+upload:
+  max-file-size: 104857600  # 100MB
+  default-chunk-size: 5242880  # 5MB (S3最小值)
+  presigned-url-expiration-minutes: 5  # 5分钟，适合测试
+
+# 禁用视频压缩功能以简化测试
+video:
+  compression:
+    enabled: false
+
+# 日志配置
+logging:
+  level:
+    com.example.minioupload: DEBUG
+    software.amazon.awssdk: DEBUG
+    org.springframework.web: DEBUG

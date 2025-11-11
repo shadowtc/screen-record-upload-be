@@ -1,6 +1,6 @@
 # 第一阶段：编译构建阶段
 # 使用包含Maven的JDK镜像进行编译
-FROM eclipse-temurin:17-jdk-alpine AS builder
+FROM maven:3.9-eclipse-temurin-17-alpine AS builder
 
 WORKDIR /app
 
@@ -8,13 +8,9 @@ WORKDIR /app
 COPY pom.xml .
 COPY src ./src
 
-# 安装Maven并编译项目
-# apk add：从Alpine包管理器安装
+# 编译项目
 # mvn clean package：清理并构建项目
-# apk del maven：构建完成后删除Maven以减小镜像大小
-RUN apk add --no-cache maven && \
-    mvn clean package -DskipTests && \
-    apk del maven
+RUN mvn clean package -DskipTests
 
 # 第二阶段：运行时阶段
 # 使用最小化的JRE镜像以减小最终镜像大小
@@ -22,25 +18,20 @@ FROM eclipse-temurin:17-jre-alpine
 
 WORKDIR /app
 
-# 安装FFmpeg和必要的库文件
-# ffmpeg：视频处理核心依赖
-# xvfb：虚拟X server（某些FFmpeg操作需要）
-# ttf-freefont：字体库（视频处理时可能需要）
-# 
-# 注意：使用Alpine Linux可以大幅减小镜像大小
-# 完整JDK镜像约350MB，使用Alpine JRE后约100MB
-RUN apk add --no-cache \
-    ffmpeg \
-    xvfb \
-    ttf-freefont \
-    && rm -rf /var/cache/apk/*
+# 暂时跳过FFmpeg安装，专注于测试分片上传功能
+# 如需视频压缩功能，请后续手动安装FFmpeg
+# RUN apk update && apk add --no-cache \
+#     ffmpeg \
+#     xvfb-run \
+#     ttf-freefont \
+#     && rm -rf /var/cache/apk/*
 
-# 创建视频压缩临时目录
-# 此目录用于存储压缩中和已完成的视频文件
+# 创建临时目录（用于上传和其他临时文件）
+# 此目录用于存储临时文件
 # chmod 777：设置所有用户可读写执行权限
 # 注意：在生产环境中应限制权限以提高安全性
-RUN mkdir -p /tmp/video-compression && \
-    chmod 777 /tmp/video-compression
+RUN mkdir -p /tmp/uploads && \
+    chmod 777 /tmp/uploads
 
 # 从构建阶段复制编译好的JAR文件
 COPY --from=builder /app/target/minio-multipart-upload-1.0.0.jar app.jar
