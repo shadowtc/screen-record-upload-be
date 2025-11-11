@@ -327,7 +327,7 @@ public class VideoCompressionService {
         
         // 如果指定了预设，从配置中加载预设参数
         if (request.getPreset() != null && properties.getPresets().getProfiles() != null) {
-            var preset = properties.getPresets().getProfiles().get(request.getPreset());
+            VideoCompressionProperties.PresetConfig.Preset preset = properties.getPresets().getProfiles().get(request.getPreset());
             if (preset != null) {
                 settingsBuilder.videoBitrate(preset.getVideoBitrate());
                 settingsBuilder.audioBitrate(preset.getAudioBitrate());
@@ -338,7 +338,7 @@ public class VideoCompressionService {
                 
                 // 应用预设中指定的分辨率配置
                 if (preset.getResolution() != null && properties.getResolution().getPresets() != null) {
-                    var resolution = properties.getResolution().getPresets().get(preset.getResolution());
+                    VideoCompressionProperties.ResolutionConfig.Resolution resolution = properties.getResolution().getPresets().get(preset.getResolution());
                     if (resolution != null) {
                         settingsBuilder.width(resolution.getWidth());
                         settingsBuilder.height(resolution.getHeight());

@@ -1,8 +1,10 @@
 package com.example.minioupload.dto;
 
 import com.example.minioupload.service.VideoCompressionService;
+import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.Builder;
+import lombok.NoArgsConstructor;
 
 /**
  * 视频压缩响应DTO
@@ -12,6 +14,7 @@ import lombok.Builder;
  */
 @Data
 @Builder
+@AllArgsConstructor
 public class VideoCompressionResponse {
     
     /**
@@ -104,7 +107,7 @@ public class VideoCompressionResponse {
      * 服务器生成响应的系统时间
      */
     private long timestamp;
-    
+
     /**
      * 构造函数：初始化时间戳
      * 在响应创建时自动设置当前时间
