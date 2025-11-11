@@ -40,12 +40,28 @@ services:
       - UPLOAD_MAX_SIZE=${UPLOAD_MAX_SIZE:-2147483648}
       - UPLOAD_CHUNK_SIZE=${UPLOAD_CHUNK_SIZE:-8388608}
       - PRESIGNED_URL_EXPIRATION=${PRESIGNED_URL_EXPIRATION:-60}
+      # Video compression environment variables
+      - VIDEO_TEMP_DIR=${VIDEO_TEMP_DIR:-/tmp/video-compression}
+      - VIDEO_MAX_JOBS=${VIDEO_MAX_JOBS:-2}
+      - VIDEO_MAX_SIZE=${VIDEO_MAX_SIZE:-1073741824}
+      - VIDEO_TIMEOUT=${VIDEO_TIMEOUT:-300}
     depends_on:
       mysql:
         condition: service_healthy
     networks:
       - minio-network
     restart: unless-stopped
+    # Resource allocation for video compression
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+    volumes:
+      - video-temp:/tmp/video-compression
 
 networks:
   minio-network:
@@ -53,3 +69,4 @@ networks:
 
 volumes:
   mysql-data:
+  video-temp:

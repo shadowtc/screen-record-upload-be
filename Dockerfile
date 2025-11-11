@@ -13,6 +13,17 @@ FROM eclipse-temurin:17-jre-alpine
 
 WORKDIR /app
 
+# Install FFmpeg and necessary libraries
+RUN apk add --no-cache \
+    ffmpeg \
+    xvfb \
+    ttf-freefont \
+    && rm -rf /var/cache/apk/*
+
+# Create temp directory for video compression
+RUN mkdir -p /tmp/video-compression && \
+    chmod 777 /tmp/video-compression
+
 COPY --from=builder /app/target/minio-multipart-upload-1.0.0.jar app.jar
 
 EXPOSE 8080

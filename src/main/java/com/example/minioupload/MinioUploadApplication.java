@@ -2,6 +2,7 @@ package com.example.minioupload;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableAsync;
 
 /**
  * MinIO分片上传服务的主Spring Boot应用程序类。
@@ -22,6 +23,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * - HikariCP用于优化的数据库连接池
  */
 @SpringBootApplication
+@EnableAsync
 public class MinioUploadApplication {
 
     /**

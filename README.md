@@ -9,6 +9,12 @@ A Spring Boot demo service for resumable multipart uploads to local MinIO with m
 - Upload progress tracking
 - Upload completion with metadata persistence
 - Upload abortion and cleanup
+- **FFmpeg Video Compression Service** - NEW!
+  - MP4 video compression with customizable parameters
+  - Multiple preset configurations (high-quality, balanced, high-compression, screen-recording)
+  - Synchronous and asynchronous processing
+  - Real-time compression progress monitoring
+  - Optimized for screen recording content
 - H2 in-memory database for demo purposes
 - CORS enabled for cross-origin requests
 
@@ -34,6 +40,12 @@ S3_PATH_STYLE=true
 UPLOAD_MAX_SIZE=2147483648
 UPLOAD_CHUNK_SIZE=8388608
 PRESIGNED_URL_EXPIRATION=60
+
+# Video Compression Configuration
+VIDEO_TEMP_DIR=/tmp/video-compression
+VIDEO_MAX_JOBS=2
+VIDEO_MAX_SIZE=1073741824
+VIDEO_TIMEOUT=300
 ```
 
 ### Default Configuration
@@ -347,6 +359,140 @@ curl -X POST http://localhost:8080/api/uploads/complete \
    - Use returned URLs to upload parts
    - Call `GET /api/uploads/{uploadId}/status` to verify
    - Call `POST /api/uploads/complete` with all part ETags
+
+## Video Compression API
+
+### 1. Compress Video (Synchronous)
+
+**Endpoint**: `POST /api/video/compress`
+
+Compresses a video file synchronously and returns the result.
+
+**Request Body**:
+```json
+{
+  "inputFilePath": "/path/to/input/video.mp4",
+  "preset": "balanced",
+  "videoBitrate": 2500000,
+  "audioBitrate": 128000,
+  "width": 1280,
+  "height": 720,
+  "crf": 23,
+  "encoderPreset": "medium",
+  "outputFormat": "mp4",
+  "twoPass": false,
+  "deleteOriginal": false
+}
+```
+
+**Response**:
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "success": true,
+  "outputFilePath": "/tmp/video-compression/video_compressed_balanced.mp4",
+  "originalSize": 104857600,
+  "compressedSize": 52428800,
+  "compressionRatio": 50.0,
+  "originalDuration": 120.5,
+  "compressionTimeMs": 15000,
+  "status": "completed",
+  "timestamp": 1699123456789
+}
+```
+
+### 2. Compress Video (Asynchronous)
+
+**Endpoint**: `POST /api/video/compress/async`
+
+Starts video compression asynchronously and returns a job ID for monitoring.
+
+**Request Body**: Same as synchronous compression
+
+**Response**:
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440001",
+  "success": true,
+  "status": "processing",
+  "timestamp": 1699123456789
+}
+```
+
+### 3. Get Compression Progress
+
+**Endpoint**: `GET /api/video/progress/{jobId}`
+
+Returns the current progress of an asynchronous compression job.
+
+**Response**:
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440001",
+  "progress": 45.5,
+  "status": "Compressing...",
+  "timestamp": 1699123490123
+}
+```
+
+### 4. Get Available Presets
+
+**Endpoint**: `GET /api/video/presets`
+
+Returns available compression presets and options.
+
+**Response**:
+```json
+{
+  "presets": ["high-quality", "balanced", "high-compression", "screen-recording"],
+  "resolutions": ["480p", "720p", "1080p", "1440p", "4k"],
+  "encoderPresets": ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"]
+}
+```
+
+### Video Compression Examples
+
+#### Basic Compression with Preset
+```bash
+curl -X POST http://localhost:8080/api/video/compress \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inputFilePath": "/uploads/video.mp4",
+    "preset": "screen-recording"
+  }'
+```
+
+#### Custom Parameters
+```bash
+curl -X POST http://localhost:8080/api/video/compress/async \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inputFilePath": "/uploads/presentation.mp4",
+    "videoBitrate": 3000000,
+    "audioBitrate": 160000,
+    "width": 1920,
+    "height": 1080,
+    "crf": 20,
+    "encoderPreset": "slow"
+  }'
+```
+
+#### Monitor Progress
+```bash
+JOB_ID="your-job-id"
+curl http://localhost:8080/api/video/progress/$JOB_ID
+```
+
+### Compression Presets
+
+| Preset | Video Bitrate | Audio Bitrate | Resolution | Quality | Use Case |
+|--------|---------------|---------------|------------|---------|----------|
+| high-quality | 5 Mbps | 192 kbps | 1080p | Excellent | Archival purposes |
+| balanced | 2.5 Mbps | 128 kbps | 720p | Good | General use |
+| high-compression | 1 Mbps | 96 kbps | 480p | Fair | Storage optimization |
+| screen-recording | 2 Mbps | 128 kbps | 1080p | Good | Screen content |
+
+For detailed documentation, see [VIDEO_COMPRESSION_GUIDE.md](./VIDEO_COMPRESSION_GUIDE.md)
 
 ## Database
 

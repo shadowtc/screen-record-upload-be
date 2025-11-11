@@ -41,3 +41,103 @@ upload:
 
 server:
   port: 8080
+
+# Video Compression Configuration
+video:
+  compression:
+    enabled: true
+    temp-directory: ${VIDEO_TEMP_DIR:/tmp/video-compression}
+    max-concurrent-jobs: ${VIDEO_MAX_JOBS:2}
+    max-file-size: ${VIDEO_MAX_SIZE:1073741824}
+    timeout-seconds: ${VIDEO_TIMEOUT:300}
+    
+    presets:
+      profiles:
+        high-quality:
+          name: "High Quality"
+          description: "Best quality with moderate compression"
+          video-bitrate: 5000000
+          audio-bitrate: 192000
+          resolution: "1080p"
+          codec: "libx264"
+          preset: "slow"
+          crf: 18
+          two-pass: true
+          
+        balanced:
+          name: "Balanced"
+          description: "Good balance between quality and size"
+          video-bitrate: 2500000
+          audio-bitrate: 128000
+          resolution: "720p"
+          codec: "libx264"
+          preset: "medium"
+          crf: 23
+          two-pass: false
+          
+        high-compression:
+          name: "High Compression"
+          description: "Maximum compression with acceptable quality"
+          video-bitrate: 1000000
+          audio-bitrate: 96000
+          resolution: "480p"
+          codec: "libx264"
+          preset: "fast"
+          crf: 28
+          two-pass: false
+          
+        screen-recording:
+          name: "Screen Recording Optimized"
+          description: "Optimized for screen recording content"
+          video-bitrate: 2000000
+          audio-bitrate: 128000
+          resolution: "1080p"
+          codec: "libx264"
+          preset: "medium"
+          crf: 20
+          two-pass: false
+    
+    encoding:
+      default-codec: "libx264"
+      default-preset: "medium"
+      default-crf: 23
+      default-audio-bitrate: 128000
+      default-audio-codec: "aac"
+      default-threads: 0
+      
+    resolution:
+      presets:
+        480p:
+          name: "480p (SD)"
+          width: 854
+          height: 480
+          recommended-bitrate: 1000000
+          description: "Standard Definition"
+          
+        720p:
+          name: "720p (HD)"
+          width: 1280
+          height: 720
+          recommended-bitrate: 2500000
+          description: "High Definition"
+          
+        1080p:
+          name: "1080p (Full HD)"
+          width: 1920
+          height: 1080
+          recommended-bitrate: 5000000
+          description: "Full High Definition"
+          
+        1440p:
+          name: "1440p (2K)"
+          width: 2560
+          height: 1440
+          recommended-bitrate: 8000000
+          description: "2K Resolution"
+          
+        4k:
+          name: "4K (UHD)"
+          width: 3840
+          height: 2160
+          recommended-bitrate: 15000000
+          description: "Ultra High Definition"
