@@ -7,6 +7,7 @@ import com.example.minioupload.dto.CompressionProgress;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bytedeco.ffmpeg.global.avcodec;
+import org.bytedeco.ffmpeg.global.avutil;
 import org.bytedeco.javacv.FFmpegFrameGrabber;
 import org.bytedeco.javacv.FFmpegFrameRecorder;
 import org.bytedeco.javacv.Frame;
@@ -194,20 +195,25 @@ public class VideoCompressionService {
         
         try (FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(inputPath);
              FFmpegFrameRecorder recorder = new FFmpegFrameRecorder(outputPath, 
-                     grabber.getAudioChannels(), grabber.getVideoWidth(), grabber.getVideoHeight())) {
+                     grabber.getAudioChannels())) {
             
             // 启动帧读取器，开始读取原始视频
             grabber.start();
             
+            // 设置录制器的视频尺寸
+            recorder.setImageWidth(grabber.getImageWidth());
+            recorder.setImageHeight(grabber.getImageHeight());
+            
             // 配置视频编码器参数
-            recorder.setVideoCodec(settings.getVideoCodec());
-            recorder.setAudioCodec(settings.getAudioCodec());
+            // 使用标准编码器常量
+            recorder.setVideoCodec(avcodec.AV_CODEC_ID_H264);
+            recorder.setAudioCodec(avcodec.AV_CODEC_ID_AAC);
             recorder.setVideoBitrate(settings.getVideoBitrate());
             recorder.setAudioBitrate(settings.getAudioBitrate());
             // CRF：0-51，建议值18-28，越低质量越好
             recorder.setVideoQuality(settings.getCrf());
             // 设置像素格式为YUV420P，这是最常见的输出格式
-            recorder.setPixelFormat(avcodec.AV_PIX_FMT_YUV420P);
+            recorder.setPixelFormat(avutil.AV_PIX_FMT_YUV420P);
             recorder.setFrameRate(grabber.getVideoFrameRate());
             
             // 设置输出分辨率，如果指定了则进行缩放，否则保持原始分辨率
@@ -215,8 +221,8 @@ public class VideoCompressionService {
                 recorder.setImageWidth(settings.getWidth());
                 recorder.setImageHeight(settings.getHeight());
             } else {
-                recorder.setImageWidth(grabber.getVideoWidth());
-                recorder.setImageHeight(grabber.getVideoHeight());
+                recorder.setImageWidth(grabber.getImageWidth());
+                recorder.setImageHeight(grabber.getImageHeight());
             }
             
             // 设置编码器预设(ultrafast-veryslow)，控制编码速度和压缩效果的平衡
@@ -284,8 +290,8 @@ public class VideoCompressionService {
             return VideoInfo.builder()
                 // 将微秒转换为秒
                 .duration(grabber.getLengthInTime() / 1000000.0)
-                .width(grabber.getVideoWidth())
-                .height(grabber.getVideoHeight())
+                .width(grabber.getImageWidth())
+                .height(grabber.getImageHeight())
                 .frameRate(grabber.getVideoFrameRate())
                 .videoBitrate(grabber.getVideoBitrate())
                 .audioBitrate(grabber.getAudioBitrate())
@@ -317,25 +323,25 @@ public class VideoCompressionService {
      * @return VideoCompressionSettings 最终的压缩设置对象
      */
     private VideoCompressionSettings applyCompressionSettings(VideoCompressionRequest request, VideoInfo videoInfo) {
-        VideoCompressionSettings settings = new VideoCompressionSettings();
+        VideoCompressionSettings.VideoCompressionSettingsBuilder settingsBuilder = VideoCompressionSettings.builder();
         
         // 如果指定了预设，从配置中加载预设参数
         if (request.getPreset() != null && properties.getPresets().getProfiles() != null) {
             var preset = properties.getPresets().getProfiles().get(request.getPreset());
             if (preset != null) {
-                settings.setVideoBitrate(preset.getVideoBitrate());
-                settings.setAudioBitrate(preset.getAudioBitrate());
-                settings.setCodec(preset.getCodec());
-                settings.setPreset(preset.getPreset());
-                settings.setCrf(preset.getCrf());
-                settings.setTwoPass(preset.isTwoPass());
+                settingsBuilder.videoBitrate(preset.getVideoBitrate());
+                settingsBuilder.audioBitrate(preset.getAudioBitrate());
+                settingsBuilder.videoCodec(preset.getCodec());
+                settingsBuilder.preset(preset.getPreset());
+                settingsBuilder.crf(preset.getCrf());
+                settingsBuilder.twoPass(preset.isTwoPass());
                 
                 // 应用预设中指定的分辨率配置
                 if (preset.getResolution() != null && properties.getResolution().getPresets() != null) {
                     var resolution = properties.getResolution().getPresets().get(preset.getResolution());
                     if (resolution != null) {
-                        settings.setWidth(resolution.getWidth());
-                        settings.setHeight(resolution.getHeight());
+                        settingsBuilder.width(resolution.getWidth());
+                        settingsBuilder.height(resolution.getHeight());
                     }
                 }
             }
@@ -343,46 +349,48 @@ public class VideoCompressionService {
         
         // 使用请求中的参数覆盖预设参数（最高优先级）
         if (request.getVideoBitrate() != null) {
-            settings.setVideoBitrate(request.getVideoBitrate());
+            settingsBuilder.videoBitrate(request.getVideoBitrate());
         }
         if (request.getAudioBitrate() != null) {
-            settings.setAudioBitrate(request.getAudioBitrate());
+            settingsBuilder.audioBitrate(request.getAudioBitrate());
         }
         if (request.getWidth() != null) {
-            settings.setWidth(request.getWidth());
+            settingsBuilder.width(request.getWidth());
         }
         if (request.getHeight() != null) {
-            settings.setHeight(request.getHeight());
+            settingsBuilder.height(request.getHeight());
         }
         if (request.getCrf() != null) {
-            settings.setCrf(request.getCrf());
+            settingsBuilder.crf(request.getCrf());
         }
         // 如果请求中的预设不是配置的预设，则作为编码器预设使用
         if (request.getPreset() != null && !properties.getPresets().getProfiles().containsKey(request.getPreset())) {
-            settings.setPreset(request.getPreset());
+            settingsBuilder.preset(request.getPreset());
         }
         
         // 为仍为空的参数填充默认值
+        VideoCompressionSettings settings = settingsBuilder.build();
+        
         if (settings.getVideoCodec() == null) {
-            settings.setVideoCodec(properties.getEncoding().getDefaultCodec());
+            settingsBuilder.videoCodec(properties.getEncoding().getDefaultCodec());
         }
         if (settings.getAudioCodec() == null) {
-            settings.setAudioCodec(properties.getEncoding().getDefaultAudioCodec());
+            settingsBuilder.audioCodec(properties.getEncoding().getDefaultAudioCodec());
         }
         if (settings.getPreset() == null) {
-            settings.setPreset(properties.getEncoding().getDefaultPreset());
+            settingsBuilder.preset(properties.getEncoding().getDefaultPreset());
         }
         if (settings.getCrf() == null) {
-            settings.setCrf(properties.getEncoding().getDefaultCRF());
+            settingsBuilder.crf(properties.getEncoding().getDefaultCRF());
         }
         if (settings.getAudioBitrate() == null) {
-            settings.setAudioBitrate(properties.getEncoding().getDefaultAudioBitrate());
+            settingsBuilder.audioBitrate(properties.getEncoding().getDefaultAudioBitrate());
         }
         if (settings.getThreads() == null) {
-            settings.setThreads(properties.getEncoding().getDefaultThreads());
+            settingsBuilder.threads(properties.getEncoding().getDefaultThreads());
         }
         
-        return settings;
+        return settingsBuilder.build();
     }
     
     /**
