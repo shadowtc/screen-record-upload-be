@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -41,12 +42,20 @@ public class MultipartUploadController {
      * 此端点验证请求并在S3/MinIO中创建新的上传会话。
      * 客户端将收到uploadId和objectKey以用于后续操作。
      * 
-     * @param request 经过验证的请求，包含文件名、大小、内容类型和可选的分片大小
+     * @param file 要上传的文件（MultipartFile）
+     * @param chunkSize 可选的自定义分片大小（字节）
      * @return 包含uploadId、objectKey、分片大小和分片编号范围的InitUploadResponse
      */
     @PostMapping("/init")
-    public ResponseEntity<InitUploadResponse> initializeUpload(@Valid @RequestBody InitUploadRequest request) {
-        log.info("POST /api/uploads/init - Initializing upload for file: {}", request.getFileName());
+    public ResponseEntity<InitUploadResponse> initializeUpload(
+            @RequestPart("file") MultipartFile file,
+            @RequestParam(value = "chunkSize", required = false) Long chunkSize) {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("File cannot be empty");
+        }
+        log.info("POST /api/uploads/init - Initializing upload for file: {}", file.getOriginalFilename());
+        
+        InitUploadRequest request = new InitUploadRequest(file, chunkSize);
         InitUploadResponse response = multipartUploadService.initializeUpload(request);
         return ResponseEntity.ok(response);
     }

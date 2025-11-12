@@ -25,13 +25,8 @@ echo ""
 # Step 1: Initialize upload
 echo "Step 1: Initializing upload..."
 INIT_RESPONSE=$(curl -s -X POST "$BASE_URL/api/uploads/init" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "fileName": "'"$FILE_NAME"'",
-    "size": '"$FILE_SIZE"',
-    "contentType": "'"$CONTENT_TYPE"'",
-    "chunkSize": '"$CHUNK_SIZE"'
-  }')
+  -F "file=@$FILE_PATH" \
+  -F "chunkSize=$CHUNK_SIZE")
 
 if [ $? -ne 0 ]; then
     echo "Error: Failed to initialize upload"

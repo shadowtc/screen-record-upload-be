@@ -141,28 +141,40 @@ public class MultipartUploadService {
      * 在S3/MinIO中初始化新的分片上传会话。
      * 
      * 此方法执行以下操作：
-     * 1. 验证文件类型（仅允许视频文件）
-     * 2. 根据配置的最大值验证文件大小
-     * 3. 生成基于UUID路径的唯一S3对象键
-     * 4. 在S3中创建分片上传会话
-     * 5. 根据分片大小计算最佳分片数
+     * 1. 从MultipartFile中提取文件元数据（名称、大小、内容类型）
+     * 2. 验证文件类型（仅允许视频文件）
+     * 3. 根据配置的最大值验证文件大小
+     * 4. 生成基于UUID路径的唯一S3对象键
+     * 5. 在S3中创建分片上传会话
+     * 6. 根据分片大小计算最佳分片数
      * 
-     * @param request 包含文件元数据的上传初始化请求
+     * @param request 包含MultipartFile和可选分片大小的上传初始化请求
      * @return 包含uploadId、objectKey和分片信息的InitUploadResponse
      * @throws IllegalArgumentException 如果文件类型不是视频或大小超出限制
      */
     public InitUploadResponse initializeUpload(InitUploadRequest request) {
-        log.info("Initializing upload for file: {}, size: {} bytes", request.getFileName(), request.getSize());
+        // 从MultipartFile中提取文件元数据
+        String fileName = request.getFile().getOriginalFilename();
+        long fileSize = request.getFile().getSize();
+        String contentType = request.getFile().getContentType();
+        
+        log.info("Initializing upload for file: {}, size: {} bytes", fileName, fileSize);
+        
+        // 验证文件名不为空
+        if (fileName == null || fileName.trim().isEmpty()) {
+            log.warn("Upload rejected: file name is empty");
+            throw new IllegalArgumentException("File name cannot be empty");
+        }
         
         // 验证文件类型 - 仅接受视频文件
-        if (!request.getContentType().startsWith("video/")) {
-            log.warn("Upload rejected: invalid content type {}", request.getContentType());
+        if (contentType == null || !contentType.startsWith("video/")) {
+            log.warn("Upload rejected: invalid content type {}", contentType);
             throw new IllegalArgumentException("Only video files are allowed");
         }
 
         // 根据配置的最大值验证文件大小
-        if (request.getSize() > uploadConfig.getMaxFileSize()) {
-            log.warn("Upload rejected: file size {} exceeds maximum {}", request.getSize(), uploadConfig.getMaxFileSize());
+        if (fileSize > uploadConfig.getMaxFileSize()) {
+            log.warn("Upload rejected: file size {} exceeds maximum {}", fileSize, uploadConfig.getMaxFileSize());
             throw new IllegalArgumentException("File size exceeds maximum allowed size");
         }
 
@@ -187,20 +199,20 @@ public class MultipartUploadService {
         }
 
         // 生成带有UUID的唯一对象键以防止冲突
-        String objectKey = UPLOADS_PREFIX + UUID.randomUUID() + "/" + request.getFileName();
+        String objectKey = UPLOADS_PREFIX + UUID.randomUUID() + "/" + fileName;
 
         // 在S3/MinIO中创建分片上传会话
         CreateMultipartUploadRequest createRequest = CreateMultipartUploadRequest.builder()
                 .bucket(s3Config.getBucket())
                 .key(objectKey)
-                .contentType(request.getContentType())
+                .contentType(contentType)
                 .build();
 
         CreateMultipartUploadResponse createResponse = s3Client.createMultipartUpload(createRequest);
         log.info("Multipart upload initialized with uploadId: {}, objectKey: {}", createResponse.uploadId(), objectKey);
 
         // 计算上传所需的总分片数
-        int maxPartNumber = (int) Math.ceil((double) request.getSize() / chunkSize);
+        int maxPartNumber = (int) Math.ceil((double) fileSize / chunkSize);
 
         return new InitUploadResponse(
                 createResponse.uploadId(),
