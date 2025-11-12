@@ -19,7 +19,9 @@ import software.amazon.awssdk.services.s3.presigner.model.UploadPartPresignReque
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -79,6 +81,63 @@ public class MultipartUploadService {
     private static final String STATUS_COMPLETED = "COMPLETED";
 
     /**
+     * 验证分片列表的有效性。
+     * 
+     * 此方法验证：
+     * 1. 分片编号必须从1开始
+     * 2. 分片编号必须是连续的（1, 2, 3...）
+     * 3. 分片编号不能重复
+     * 4. 每个分片必须有有效的ETag
+     * 
+     * @param parts 要验证的分片列表
+     * @throws IllegalArgumentException 如果验证失败
+     */
+    private void validateParts(List<PartETag> parts) {
+        if (parts == null || parts.isEmpty()) {
+            throw new IllegalArgumentException("Parts list cannot be null or empty");
+        }
+        
+        Set<Integer> partNumbers = new HashSet<>();
+        int expectedPartNumber = 1;
+        
+        for (PartETag part : parts) {
+            // 验证分片编号为正数
+            if (part.getPartNumber() <= 0) {
+                throw new IllegalArgumentException("Part numbers must be positive, got: " + part.getPartNumber());
+            }
+            
+            // 验证ETag不为空
+            if (part.getETag() == null || part.getETag().trim().isEmpty()) {
+                throw new IllegalArgumentException("ETag cannot be null or empty for part: " + part.getPartNumber());
+            }
+            
+            // 验证分片编号不重复
+            if (!partNumbers.add(part.getPartNumber())) {
+                throw new IllegalArgumentException("Duplicate part number found: " + part.getPartNumber());
+            }
+            
+            expectedPartNumber++;
+        }
+        
+        // 按分片编号排序后再验证连续性
+        List<Integer> sortedPartNumbers = new ArrayList<>(partNumbers);
+        sortedPartNumbers.sort(Integer::compareTo);
+        
+        for (int i = 0; i < sortedPartNumbers.size(); i++) {
+            int expectedNumber = i + 1;
+            int actualNumber = sortedPartNumbers.get(i);
+            
+            if (actualNumber != expectedNumber) {
+                throw new IllegalArgumentException(
+                        String.format("Parts must be consecutive. Expected part %d, but found %d", 
+                                expectedNumber, actualNumber));
+            }
+        }
+        
+        log.debug("Parts validation passed for {} parts", parts.size());
+    }
+
+    /**
      * 在S3/MinIO中初始化新的分片上传会话。
      * 
      * 此方法执行以下操作：
@@ -111,6 +170,21 @@ public class MultipartUploadService {
         long chunkSize = request.getChunkSize() != null && request.getChunkSize() > 0
                 ? request.getChunkSize()
                 : uploadConfig.getDefaultChunkSize();
+
+        // 验证分片大小是否符合S3要求
+        // S3要求：除了最后一个分片，其他分片必须至少5MB
+        final long MIN_CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
+        final long MAX_CHUNK_SIZE = 5L * 1024 * 1024 * 1024; // 5GB (S3限制)
+        
+        if (chunkSize < MIN_CHUNK_SIZE) {
+            log.warn("Upload rejected: chunk size {} is below minimum requirement {}", chunkSize, MIN_CHUNK_SIZE);
+            throw new IllegalArgumentException("Chunk size must be at least 5MB (5242880 bytes)");
+        }
+        
+        if (chunkSize > MAX_CHUNK_SIZE) {
+            log.warn("Upload rejected: chunk size {} exceeds maximum {}", chunkSize, MAX_CHUNK_SIZE);
+            throw new IllegalArgumentException("Chunk size cannot exceed 5GB (5368709120 bytes)");
+        }
 
         // 生成带有UUID的唯一对象键以防止冲突
         String objectKey = UPLOADS_PREFIX + UUID.randomUUID() + "/" + request.getFileName();
@@ -161,31 +235,64 @@ public class MultipartUploadService {
         
         log.info("Generating pre-signed URLs for uploadId: {}, parts: {} to {}", uploadId, startPartNumber, endPartNumber);
 
-        List<PresignedUrlResponse> presignedUrls = new ArrayList<>(endPartNumber - startPartNumber + 1);
+        // 验证输入参数
+        if (uploadId == null || uploadId.trim().isEmpty()) {
+            throw new IllegalArgumentException("UploadId cannot be null or empty");
+        }
+        
+        if (objectKey == null || objectKey.trim().isEmpty()) {
+            throw new IllegalArgumentException("ObjectKey cannot be null or empty");
+        }
+        
+        if (startPartNumber <= 0) {
+            throw new IllegalArgumentException("Start part number must be positive, got: " + startPartNumber);
+        }
+        
+        if (endPartNumber < startPartNumber) {
+            throw new IllegalArgumentException(
+                    String.format("End part number (%d) must be greater than or equal to start part number (%d)", 
+                            endPartNumber, startPartNumber));
+        }
+        
+        // 限制一次请求的分片数量以防止过大的响应
+        final int MAX_PARTS_PER_REQUEST = 100;
+        int partsRequested = endPartNumber - startPartNumber + 1;
+        if (partsRequested > MAX_PARTS_PER_REQUEST) {
+            throw new IllegalArgumentException(
+                    String.format("Cannot request more than %d parts in a single request. Requested: %d", 
+                            MAX_PARTS_PER_REQUEST, partsRequested));
+        }
+
+        List<PresignedUrlResponse> presignedUrls = new ArrayList<>(partsRequested);
         Duration expiration = Duration.ofMinutes(uploadConfig.getPresignedUrlExpirationMinutes());
         Instant expiresAt = Instant.now().plus(expiration);
 
         // 为指定范围内的每个分片生成预签名URL
         for (int partNumber = startPartNumber; partNumber <= endPartNumber; partNumber++) {
-            UploadPartRequest uploadPartRequest = UploadPartRequest.builder()
-                    .bucket(s3Config.getBucket())
-                    .key(objectKey)
-                    .uploadId(uploadId)
-                    .partNumber(partNumber)
-                    .build();
+            try {
+                UploadPartRequest uploadPartRequest = UploadPartRequest.builder()
+                        .bucket(s3Config.getBucket())
+                        .key(objectKey)
+                        .uploadId(uploadId)
+                        .partNumber(partNumber)
+                        .build();
 
-            UploadPartPresignRequest presignRequest = UploadPartPresignRequest.builder()
-                    .signatureDuration(expiration)
-                    .uploadPartRequest(uploadPartRequest)
-                    .build();
+                UploadPartPresignRequest presignRequest = UploadPartPresignRequest.builder()
+                        .signatureDuration(expiration)
+                        .uploadPartRequest(uploadPartRequest)
+                        .build();
 
-            PresignedUploadPartRequest presignedRequest = s3Presigner.presignUploadPart(presignRequest);
+                PresignedUploadPartRequest presignedRequest = s3Presigner.presignUploadPart(presignRequest);
 
-            presignedUrls.add(new PresignedUrlResponse(
-                    partNumber,
-                    presignedRequest.url().toString(),
-                    expiresAt
-            ));
+                presignedUrls.add(new PresignedUrlResponse(
+                        partNumber,
+                        presignedRequest.url().toString(),
+                        expiresAt
+                ));
+            } catch (Exception e) {
+                log.error("Failed to generate presigned URL for part {} of uploadId: {}", partNumber, uploadId, e);
+                throw new RuntimeException("Failed to generate presigned URL for part " + partNumber, e);
+            }
         }
 
         log.info("Generated {} pre-signed URLs expiring at {}", presignedUrls.size(), expiresAt);
@@ -207,26 +314,43 @@ public class MultipartUploadService {
     public List<UploadPartInfo> getUploadStatus(String uploadId, String objectKey) {
         log.info("Retrieving upload status for uploadId: {}, objectKey: {}", uploadId, objectKey);
         
-        ListPartsRequest listPartsRequest = ListPartsRequest.builder()
-                .bucket(s3Config.getBucket())
-                .key(objectKey)
-                .uploadId(uploadId)
-                .build();
-
-        ListPartsResponse listPartsResponse = s3Client.listParts(listPartsRequest);
-
-        // 将S3的Part对象转换为我们的DTO格式，并预分配容量
-        List<UploadPartInfo> uploadedParts = new ArrayList<>(listPartsResponse.parts().size());
-        for (Part part : listPartsResponse.parts()) {
-            uploadedParts.add(new UploadPartInfo(
-                    part.partNumber(),
-                    part.eTag(),
-                    part.size()
-            ));
+        // 验证输入参数
+        if (uploadId == null || uploadId.trim().isEmpty()) {
+            throw new IllegalArgumentException("UploadId cannot be null or empty");
         }
+        
+        if (objectKey == null || objectKey.trim().isEmpty()) {
+            throw new IllegalArgumentException("ObjectKey cannot be null or empty");
+        }
+        
+        try {
+            ListPartsRequest listPartsRequest = ListPartsRequest.builder()
+                    .bucket(s3Config.getBucket())
+                    .key(objectKey)
+                    .uploadId(uploadId)
+                    .build();
 
-        log.info("Upload status retrieved: {} parts uploaded", uploadedParts.size());
-        return uploadedParts;
+            ListPartsResponse listPartsResponse = s3Client.listParts(listPartsRequest);
+
+            // 将S3的Part对象转换为我们的DTO格式，并预分配容量
+            List<UploadPartInfo> uploadedParts = new ArrayList<>(listPartsResponse.parts().size());
+            for (Part part : listPartsResponse.parts()) {
+                uploadedParts.add(new UploadPartInfo(
+                        part.partNumber(),
+                        part.eTag(),
+                        part.size()
+                ));
+            }
+
+            log.info("Upload status retrieved: {} parts uploaded", uploadedParts.size());
+            return uploadedParts;
+        } catch (NoSuchUploadException e) {
+            log.warn("Upload not found for uploadId: {}, objectKey: {}", uploadId, objectKey);
+            throw new IllegalArgumentException("Upload not found or has been completed", e);
+        } catch (Exception e) {
+            log.error("Failed to retrieve upload status for uploadId: {}, objectKey: {}", uploadId, objectKey, e);
+            throw new RuntimeException("Failed to retrieve upload status: " + e.getMessage(), e);
+        }
     }
 
     /**
@@ -249,65 +373,94 @@ public class MultipartUploadService {
     public CompleteUploadResponse completeUpload(CompleteUploadRequest request) {
         log.info("Completing upload for uploadId: {}, objectKey: {}", request.getUploadId(), request.getObjectKey());
         
-        // 将DTO转换为S3 SDK格式，并预分配容量
-        List<CompletedPart> completedParts = new ArrayList<>(request.getParts().size());
-        for (PartETag partETag : request.getParts()) {
-            completedParts.add(CompletedPart.builder()
-                    .partNumber(partETag.getPartNumber())
-                    .eTag(partETag.getETag())
-                    .build());
+        // 验证分片列表不为空
+        if (request.getParts() == null || request.getParts().isEmpty()) {
+            throw new IllegalArgumentException("Parts list cannot be empty");
         }
+        
+        // 验证分片编号的连续性和唯一性
+        validateParts(request.getParts());
+        
+        // 检查上传是否已经完成（通过检查是否已存在数据库记录）
+        if (videoRecordingRepository.existsByObjectKey(request.getObjectKey())) {
+            log.warn("Upload already completed for objectKey: {}", request.getObjectKey());
+            throw new IllegalStateException("Upload has already been completed");
+        }
+        
+        try {
+            // 将DTO转换为S3 SDK格式，并预分配容量
+            List<CompletedPart> completedParts = new ArrayList<>(request.getParts().size());
+            for (PartETag partETag : request.getParts()) {
+                completedParts.add(CompletedPart.builder()
+                        .partNumber(partETag.getPartNumber())
+                        .eTag(partETag.getETag())
+                        .build());
+            }
 
-        CompletedMultipartUpload completedUpload = CompletedMultipartUpload.builder()
-                .parts(completedParts)
-                .build();
+            CompletedMultipartUpload completedUpload = CompletedMultipartUpload.builder()
+                    .parts(completedParts)
+                    .build();
 
-        // 在S3/MinIO中完成分片上传
-        CompleteMultipartUploadRequest completeRequest = CompleteMultipartUploadRequest.builder()
-                .bucket(s3Config.getBucket())
-                .key(request.getObjectKey())
-                .uploadId(request.getUploadId())
-                .multipartUpload(completedUpload)
-                .build();
+            // 在S3/MinIO中完成分片上传
+            CompleteMultipartUploadRequest completeRequest = CompleteMultipartUploadRequest.builder()
+                    .bucket(s3Config.getBucket())
+                    .key(request.getObjectKey())
+                    .uploadId(request.getUploadId())
+                    .multipartUpload(completedUpload)
+                    .build();
 
-        CompleteMultipartUploadResponse completeResponse = s3Client.completeMultipartUpload(completeRequest);
-        log.info("Multipart upload completed successfully with ETag: {}", completeResponse.eTag());
+            CompleteMultipartUploadResponse completeResponse = s3Client.completeMultipartUpload(completeRequest);
+            log.info("Multipart upload completed successfully with ETag: {}", completeResponse.eTag());
 
-        // 从S3获取最终对象元数据
-        HeadObjectRequest headRequest = HeadObjectRequest.builder()
-                .bucket(s3Config.getBucket())
-                .key(request.getObjectKey())
-                .build();
+            // 从S3获取最终对象元数据
+            HeadObjectRequest headRequest = HeadObjectRequest.builder()
+                    .bucket(s3Config.getBucket())
+                    .key(request.getObjectKey())
+                    .build();
 
-        HeadObjectResponse headResponse = s3Client.headObject(headRequest);
+            HeadObjectResponse headResponse = s3Client.headObject(headRequest);
 
-        // 从对象键提取文件名（/之后的最后一段）
-        String filename = request.getObjectKey().substring(request.getObjectKey().lastIndexOf("/") + 1);
+            // 从对象键提取文件名（/之后的最后一段）
+            String filename = request.getObjectKey().substring(request.getObjectKey().lastIndexOf("/") + 1);
 
-        // 使用构建器模式构建并将视频录制元数据持久化到MySQL
-        VideoRecording recording = VideoRecording.builder()
-                .filename(filename)
-                .size(headResponse.contentLength())
-                .objectKey(request.getObjectKey())
-                .status(STATUS_COMPLETED)
-                .checksum(completeResponse.eTag())
-                .build();
+            // 使用构建器模式构建并将视频录制元数据持久化到MySQL
+            VideoRecording recording = VideoRecording.builder()
+                    .filename(filename)
+                    .size(headResponse.contentLength())
+                    .objectKey(request.getObjectKey())
+                    .status(STATUS_COMPLETED)
+                    .checksum(completeResponse.eTag())
+                    .build();
 
-        VideoRecording savedRecording = videoRecordingRepository.save(recording);
-        log.info("Video recording metadata saved to database with id: {}", savedRecording.getId());
+            VideoRecording savedRecording = videoRecordingRepository.save(recording);
+            log.info("Video recording metadata saved to database with id: {}", savedRecording.getId());
 
-        // 为完成的上传生成具有时间限制的下载URL
-        String downloadUrl = generateDownloadUrl(request.getObjectKey());
+            // 为完成的上传生成具有时间限制的下载URL
+            String downloadUrl = generateDownloadUrl(request.getObjectKey());
 
-        return new CompleteUploadResponse(
-                savedRecording.getId(),
-                savedRecording.getFilename(),
-                savedRecording.getSize(),
-                savedRecording.getObjectKey(),
-                savedRecording.getStatus(),
-                downloadUrl,
-                savedRecording.getCreatedAt()
-        );
+            return new CompleteUploadResponse(
+                    savedRecording.getId(),
+                    savedRecording.getFilename(),
+                    savedRecording.getSize(),
+                    savedRecording.getObjectKey(),
+                    savedRecording.getStatus(),
+                    downloadUrl,
+                    savedRecording.getCreatedAt()
+            );
+        } catch (Exception e) {
+            log.error("Failed to complete upload for uploadId: {}, objectKey: {}", 
+                    request.getUploadId(), request.getObjectKey(), e);
+            
+            // 如果S3操作失败，尝试中止上传以清理分片
+            try {
+                abortUpload(new AbortUploadRequest(request.getUploadId(), request.getObjectKey()));
+                log.info("Cleaned up failed upload: {}", request.getUploadId());
+            } catch (Exception cleanupException) {
+                log.error("Failed to cleanup upload after failure: {}", request.getUploadId(), cleanupException);
+            }
+            
+            throw new RuntimeException("Failed to complete upload: " + e.getMessage(), e);
+        }
     }
 
     /**
@@ -325,14 +478,33 @@ public class MultipartUploadService {
     public void abortUpload(AbortUploadRequest request) {
         log.info("Aborting upload for uploadId: {}, objectKey: {}", request.getUploadId(), request.getObjectKey());
         
-        AbortMultipartUploadRequest abortRequest = AbortMultipartUploadRequest.builder()
-                .bucket(s3Config.getBucket())
-                .key(request.getObjectKey())
-                .uploadId(request.getUploadId())
-                .build();
+        // 验证输入参数
+        if (request.getUploadId() == null || request.getUploadId().trim().isEmpty()) {
+            throw new IllegalArgumentException("UploadId cannot be null or empty");
+        }
+        
+        if (request.getObjectKey() == null || request.getObjectKey().trim().isEmpty()) {
+            throw new IllegalArgumentException("ObjectKey cannot be null or empty");
+        }
+        
+        try {
+            AbortMultipartUploadRequest abortRequest = AbortMultipartUploadRequest.builder()
+                    .bucket(s3Config.getBucket())
+                    .key(request.getObjectKey())
+                    .uploadId(request.getUploadId())
+                    .build();
 
-        s3Client.abortMultipartUpload(abortRequest);
-        log.info("Upload aborted successfully, all parts removed from storage");
+            s3Client.abortMultipartUpload(abortRequest);
+            log.info("Upload aborted successfully, all parts removed from storage");
+        } catch (NoSuchUploadException e) {
+            log.warn("Upload not found for abort operation, uploadId: {}, objectKey: {}", 
+                    request.getUploadId(), request.getObjectKey());
+            // 上传不存在时不算错误，可能是已经被中止或完成
+        } catch (Exception e) {
+            log.error("Failed to abort upload for uploadId: {}, objectKey: {}", 
+                    request.getUploadId(), request.getObjectKey(), e);
+            throw new RuntimeException("Failed to abort upload: " + e.getMessage(), e);
+        }
     }
 
     /**
@@ -350,19 +522,32 @@ public class MultipartUploadService {
     private String generateDownloadUrl(String objectKey) {
         log.debug("Generating download URL for objectKey: {}", objectKey);
         
-        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
-                .bucket(s3Config.getBucket())
-                .key(objectKey)
-                .build();
+        if (objectKey == null || objectKey.trim().isEmpty()) {
+            throw new IllegalArgumentException("ObjectKey cannot be null or empty");
+        }
+        
+        try {
+            GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                    .bucket(s3Config.getBucket())
+                    .key(objectKey)
+                    .build();
 
-        software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest presignRequest =
-                software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest.builder()
-                        .signatureDuration(Duration.ofMinutes(uploadConfig.getPresignedUrlExpirationMinutes()))
-                        .getObjectRequest(getObjectRequest)
-                        .build();
+            software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest presignRequest =
+                    software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest.builder()
+                            .signatureDuration(Duration.ofMinutes(uploadConfig.getPresignedUrlExpirationMinutes()))
+                            .getObjectRequest(getObjectRequest)
+                            .build();
 
-        PresignedGetObjectRequest presignedRequest = s3Presigner.presignGetObject(presignRequest);
+            PresignedGetObjectRequest presignedRequest = s3Presigner.presignGetObject(presignRequest);
 
-        return presignedRequest.url().toString();
+            String downloadUrl = presignedRequest.url().toString();
+            log.debug("Generated download URL for objectKey: {}, expires in {} minutes", 
+                    objectKey, uploadConfig.getPresignedUrlExpirationMinutes());
+            
+            return downloadUrl;
+        } catch (Exception e) {
+            log.error("Failed to generate download URL for objectKey: {}", objectKey, e);
+            throw new RuntimeException("Failed to generate download URL: " + e.getMessage(), e);
+        }
     }
 }

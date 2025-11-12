@@ -75,10 +75,17 @@ for i in "${!PARTS[@]}"; do
     PRESIGNED_RESPONSE=$(curl -s -X GET \
         "$BASE_URL/api/uploads/$UPLOAD_ID/parts?objectKey=$OBJECT_KEY&startPartNumber=$PART_NUMBER&endPartNumber=$PART_NUMBER")
     
+    # 检查是否成功获取响应
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to get presigned URL response for part $PART_NUMBER"
+        exit 1
+    fi
+    
     PRESIGNED_URL=$(echo "$PRESIGNED_RESPONSE" | grep -o '"url":"[^"]*"' | cut -d'"' -f4 | sed 's/\\//g')
     
     if [ -z "$PRESIGNED_URL" ]; then
         echo "Error: Failed to get presigned URL for part $PART_NUMBER"
+        echo "Response was: $PRESIGNED_RESPONSE"
         exit 1
     fi
     
@@ -94,6 +101,13 @@ for i in "${!PARTS[@]}"; do
     
     if [ "$HTTP_CODE" != "200" ]; then
         echo "Error: Failed to upload part $PART_NUMBER (HTTP $HTTP_CODE)"
+        echo "Upload response: $UPLOAD_RESPONSE"
+        exit 1
+    fi
+    
+    if [ -z "$ETAG" ]; then
+        echo "Error: No ETag received for part $PART_NUMBER"
+        echo "Upload response: $UPLOAD_RESPONSE"
         exit 1
     fi
     
