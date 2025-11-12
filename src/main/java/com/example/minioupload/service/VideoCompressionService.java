@@ -11,7 +11,6 @@ import org.bytedeco.ffmpeg.global.avutil;
 import org.bytedeco.javacv.FFmpegFrameGrabber;
 import org.bytedeco.javacv.FFmpegFrameRecorder;
 import org.bytedeco.javacv.Frame;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Qualifier;
 
@@ -22,6 +21,7 @@ import java.nio.file.Paths;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -41,14 +41,28 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class VideoCompressionService {
     
     /** 视频压缩配置属性 */
     private final VideoCompressionProperties properties;
     
+    /** 异步执行器，用于视频压缩任务 */
+    private final Executor videoCompressionExecutor;
+    
     /** 压缩任务进度追踪映射表，使用ConcurrentHashMap确保线程安全性 */
     private final ConcurrentHashMap<String, CompressionProgress> progressMap = new ConcurrentHashMap<>();
+    
+    /**
+     * 构造函数
+     * 
+     * @param properties 视频压缩配置属性
+     * @param videoCompressionExecutor 异步执行器
+     */
+    public VideoCompressionService(VideoCompressionProperties properties,
+                                   @Qualifier("videoCompressionExecutor") Executor videoCompressionExecutor) {
+        this.properties = properties;
+        this.videoCompressionExecutor = videoCompressionExecutor;
+    }
     
     /**
      * 提交异步视频压缩任务
@@ -70,8 +84,8 @@ public class VideoCompressionService {
         CompressionProgress progress = new CompressionProgress(jobId, 0.0, "Submitted, waiting to start...");
         progressMap.put(jobId, progress);
         
-        // 异步执行压缩任务
-        compressVideoAsyncInternal(request, jobId);
+        // 异步执行压缩任务 - 使用CompletableFuture直接提交到线程池
+        CompletableFuture.runAsync(() -> compressVideoAsyncInternal(request, jobId), videoCompressionExecutor);
         
         log.info("Compression job submitted: {} for file: {}", jobId, request.getInputFilePath());
         return jobId;
@@ -86,7 +100,6 @@ public class VideoCompressionService {
      * @param request 视频压缩请求对象，包含输入文件路径和压缩参数
      * @param jobId 压缩任务的唯一标识符
      */
-    @Async("videoCompressionExecutor")
     private void compressVideoAsyncInternal(VideoCompressionRequest request, String jobId) {
         try {
             log.info("Starting video compression job: {} for file: {}", jobId, request.getInputFilePath());
@@ -146,14 +159,15 @@ public class VideoCompressionService {
      * @see VideoCompressionRequest
      * @see VideoCompressionResponse
      */
-    @Async("videoCompressionExecutor")
     public CompletableFuture<VideoCompressionResponse> compressVideoAsync(VideoCompressionRequest request) {
-        try {
-            return CompletableFuture.completedFuture(compressVideo(request));
-        } catch (Exception e) {
-            log.error("Video compression failed", e);
-            return CompletableFuture.failedFuture(e);
-        }
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return compressVideo(request);
+            } catch (Exception e) {
+                log.error("Video compression failed", e);
+                throw new RuntimeException(e);
+            }
+        }, videoCompressionExecutor);
     }
     
     /**
