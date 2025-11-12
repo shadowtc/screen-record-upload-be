@@ -87,15 +87,9 @@ The application will start on port 8080 by default.
 
 Initializes a multipart upload and returns upload metadata.
 
-**Request Body**:
-```json
-{
-  "fileName": "video.mp4",
-  "size": 524288000,
-  "contentType": "video/mp4",
-  "chunkSize": 8388608
-}
-```
+**Request Parameters**:
+- `file`: The video file (multipart form-data)
+- `chunkSize` (optional): Custom chunk size in bytes
 
 **Response**:
 ```json
@@ -111,13 +105,14 @@ Initializes a multipart upload and returns upload metadata.
 **cURL Example**:
 ```bash
 curl -X POST http://localhost:8080/api/uploads/init \
-  -H "Content-Type: application/json" \
-  -d '{
-    "fileName": "test-video.mp4",
-    "size": 524288000,
-    "contentType": "video/mp4",
-    "chunkSize": 8388608
-  }'
+  -F "file=@test-video.mp4" \
+  -F "chunkSize=8388608"
+```
+
+Or with just the file:
+```bash
+curl -X POST http://localhost:8080/api/uploads/init \
+  -F "file=@test-video.mp4"
 ```
 
 ### 2. Get Presigned URLs for Parts
@@ -281,13 +276,8 @@ Here's a complete workflow for uploading a 500MB video file:
 
 ```bash
 INIT_RESPONSE=$(curl -X POST http://localhost:8080/api/uploads/init \
-  -H "Content-Type: application/json" \
-  -d '{
-    "fileName": "test-video.mp4",
-    "size": 524288000,
-    "contentType": "video/mp4",
-    "chunkSize": 8388608
-  }')
+  -F "file=@test-video.mp4" \
+  -F "chunkSize=8388608")
 
 echo $INIT_RESPONSE
 ```

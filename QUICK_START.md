@@ -55,13 +55,8 @@ Once the application is running (default port 8080):
 
 ```bash
 curl -X POST http://localhost:8080/api/uploads/init \
-  -H "Content-Type: application/json" \
-  -d '{
-    "fileName": "sample.mp4",
-    "size": 100000000,
-    "contentType": "video/mp4",
-    "chunkSize": 8388608
-  }'
+  -F "file=@sample.mp4" \
+  -F "chunkSize=8388608"
 ```
 
 Expected response:

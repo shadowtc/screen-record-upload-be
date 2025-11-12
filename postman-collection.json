@@ -43,15 +43,21 @@
       ],
       "request": {
         "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
+        "header": [],
         "body": {
-          "mode": "raw",
-          "raw": "{\n  \"fileName\": \"test-video.mp4\",\n  \"size\": 524288000,\n  \"contentType\": \"video/mp4\",\n  \"chunkSize\": 8388608\n}"
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": "path/to/test-video.mp4"
+            },
+            {
+              "key": "chunkSize",
+              "value": "8388608",
+              "type": "text"
+            }
+          ]
         },
         "url": {
           "raw": "{{base_url}}/api/uploads/init",

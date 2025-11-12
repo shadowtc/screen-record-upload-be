@@ -67,14 +67,8 @@ Upload limits:
 Initializes a multipart upload session.
 
 **Request**:
-```json
-{
-  "fileName": "video.mp4",
-  "size": 524288000,
-  "contentType": "video/mp4",
-  "chunkSize": 8388608
-}
-```
+- Form data with file (MultipartFile)
+- Optional: chunkSize parameter
 
 **Response**:
 ```json
@@ -88,11 +82,13 @@ Initializes a multipart upload session.
 ```
 
 **Logic**:
-1. Validates content type starts with "video/"
-2. Checks file size against max limit
-3. Calls S3 CreateMultipartUpload
-4. Calculates number of parts needed
-5. Returns upload metadata
+1. Extracts filename, size, and content type from MultipartFile
+2. Validates content type starts with "video/"
+3. Checks file size against max limit
+4. Validates chunk size (5MB min, 5GB max)
+5. Calls S3 CreateMultipartUpload
+6. Calculates number of parts needed
+7. Returns upload metadata
 
 #### GET /api/uploads/{uploadId}/parts
 Generates presigned PUT URLs for uploading specific parts.
