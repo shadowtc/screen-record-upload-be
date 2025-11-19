@@ -7,8 +7,11 @@ import com.example.minioupload.model.VideoRecording;
 import com.example.minioupload.repository.VideoRecordingRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
@@ -16,13 +19,16 @@ import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequ
 import software.amazon.awssdk.services.s3.presigner.model.PresignedUploadPartRequest;
 import software.amazon.awssdk.services.s3.presigner.model.UploadPartPresignRequest;
 
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 
 /**
  * 处理S3/MinIO分片上传操作的服务类。
@@ -42,7 +48,6 @@ import java.util.UUID;
  */
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class MultipartUploadService {
 
     /**
@@ -69,6 +74,16 @@ public class MultipartUploadService {
      * 用于将视频录制元数据持久化到MySQL的仓库
      */
     private final VideoRecordingRepository videoRecordingRepository;
+    
+    /**
+     * 异步执行器，用于异步上传任务
+     */
+    private final Executor videoCompressionExecutor;
+
+    /**
+     * 异步上传任务进度追踪映射表，使用ConcurrentHashMap确保线程安全性
+     */
+    private final ConcurrentHashMap<String, AsyncUploadProgress> asyncUploadProgressMap = new ConcurrentHashMap<>();
 
     /**
      * S3中上传目录前缀的常量
@@ -79,6 +94,32 @@ public class MultipartUploadService {
      * 已完成上传状态的常量
      */
     private static final String STATUS_COMPLETED = "COMPLETED";
+    
+    /**
+     * 异步上传状态常量
+     */
+    private static final String ASYNC_STATUS_SUBMITTED = "SUBMITTED";
+    private static final String ASYNC_STATUS_UPLOADING = "UPLOADING";
+    private static final String ASYNC_STATUS_COMPLETED = "COMPLETED";
+    private static final String ASYNC_STATUS_FAILED = "FAILED";
+    
+    /**
+     * 构造函数
+     */
+    public MultipartUploadService(
+            S3Client s3Client,
+            S3Presigner s3Presigner,
+            S3ConfigProperties s3Config,
+            UploadConfigProperties uploadConfig,
+            VideoRecordingRepository videoRecordingRepository,
+            @Qualifier("videoCompressionExecutor") Executor videoCompressionExecutor) {
+        this.s3Client = s3Client;
+        this.s3Presigner = s3Presigner;
+        this.s3Config = s3Config;
+        this.uploadConfig = uploadConfig;
+        this.videoRecordingRepository = videoRecordingRepository;
+        this.videoCompressionExecutor = videoCompressionExecutor;
+    }
 
     /**
      * 验证分片列表的有效性。
@@ -561,5 +602,357 @@ public class MultipartUploadService {
             log.error("Failed to generate download URL for objectKey: {}", objectKey, e);
             throw new RuntimeException("Failed to generate download URL: " + e.getMessage(), e);
         }
+    }
+    
+    /**
+     * 提交异步分片上传任务
+     * 
+     * 此方法接收整个文件，然后在后台异步执行以下操作：
+     * 1. 将文件保存到临时目录
+     * 2. 在MinIO中初始化分片上传
+     * 3. 将文件分片并逐个上传到MinIO
+     * 4. 完成分片上传
+     * 5. 将元数据持久化到数据库
+     * 6. 清理临时文件
+     * 
+     * @param file 要上传的文件
+     * @param chunkSize 可选的分片大小（字节），null表示使用默认值
+     * @return 上传任务的唯一标识符，用于后续进度查询
+     */
+    public String submitAsyncUpload(MultipartFile file, Long chunkSize) {
+        // 生成任务ID
+        String jobId = UUID.randomUUID().toString();
+        
+        // 提取文件元数据
+        String fileName = file.getOriginalFilename();
+        long fileSize = file.getSize();
+        String contentType = file.getContentType();
+        
+        log.info("Submitting async upload job: {} for file: {}, size: {} bytes", jobId, fileName, fileSize);
+        
+        // 验证文件名不为空
+        if (fileName == null || fileName.trim().isEmpty()) {
+            throw new IllegalArgumentException("File name cannot be empty");
+        }
+        
+        // 验证文件类型 - 仅接受视频文件
+        if (contentType == null || !contentType.startsWith("video/")) {
+            throw new IllegalArgumentException("Only video files are allowed");
+        }
+        
+        // 验证文件大小
+        if (fileSize > uploadConfig.getMaxFileSize()) {
+            throw new IllegalArgumentException("File size exceeds maximum allowed size");
+        }
+        
+        // 确定分片大小
+        long actualChunkSize = chunkSize != null && chunkSize > 0
+                ? chunkSize
+                : uploadConfig.getDefaultChunkSize();
+        
+        // 验证分片大小
+        final long MIN_CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
+        final long MAX_CHUNK_SIZE = 5L * 1024 * 1024 * 1024; // 5GB
+        
+        if (actualChunkSize < MIN_CHUNK_SIZE) {
+            throw new IllegalArgumentException("Chunk size must be at least 5MB (5242880 bytes)");
+        }
+        
+        if (actualChunkSize > MAX_CHUNK_SIZE) {
+            throw new IllegalArgumentException("Chunk size cannot exceed 5GB (5368709120 bytes)");
+        }
+        
+        // 计算总分片数
+        int totalParts = (int) Math.ceil((double) fileSize / actualChunkSize);
+        
+        // 初始化进度跟踪
+        AsyncUploadProgress progress = AsyncUploadProgress.builder()
+                .jobId(jobId)
+                .status(ASYNC_STATUS_SUBMITTED)
+                .progress(0.0)
+                .message("Upload submitted, waiting to start...")
+                .uploadedParts(0)
+                .totalParts(totalParts)
+                .fileName(fileName)
+                .fileSize(fileSize)
+                .startTime(Instant.now())
+                .build();
+        asyncUploadProgressMap.put(jobId, progress);
+        
+        // 异步执行上传任务
+        CompletableFuture.runAsync(() -> executeAsyncUpload(file, actualChunkSize, jobId), videoCompressionExecutor);
+        
+        log.info("Async upload job submitted: {}, total parts: {}", jobId, totalParts);
+        return jobId;
+    }
+    
+    /**
+     * 执行异步上传的内部方法
+     * 
+     * @param file 要上传的文件
+     * @param chunkSize 分片大小
+     * @param jobId 任务ID
+     */
+    private void executeAsyncUpload(MultipartFile file, long chunkSize, String jobId) {
+        Path tempFile = null;
+        String uploadId = null;
+        String objectKey = null;
+        
+        try {
+            // 更新状态：正在保存文件到临时目录
+            updateProgress(jobId, ASYNC_STATUS_UPLOADING, 5.0, "Saving file to temporary directory...", 0);
+            
+            // 保存文件到临时目录
+            tempFile = Files.createTempFile("async-upload-", "-" + file.getOriginalFilename());
+            file.transferTo(tempFile.toFile());
+            log.info("File saved to temporary location: {}", tempFile);
+            
+            // 更新状态：正在初始化MinIO上传
+            updateProgress(jobId, ASYNC_STATUS_UPLOADING, 10.0, "Initializing MinIO upload...", 0);
+            
+            // 生成唯一的对象键
+            objectKey = UPLOADS_PREFIX + UUID.randomUUID() + "/" + file.getOriginalFilename();
+            
+            // 在MinIO中初始化分片上传
+            CreateMultipartUploadRequest createRequest = CreateMultipartUploadRequest.builder()
+                    .bucket(s3Config.getBucket())
+                    .key(objectKey)
+                    .contentType(file.getContentType())
+                    .build();
+            
+            CreateMultipartUploadResponse createResponse = s3Client.createMultipartUpload(createRequest);
+            uploadId = createResponse.uploadId();
+            log.info("MinIO multipart upload initialized with uploadId: {}", uploadId);
+            
+            // 更新状态：正在上传分片
+            updateProgress(jobId, ASYNC_STATUS_UPLOADING, 15.0, "Uploading parts to MinIO...", 0);
+            
+            // 上传分片
+            List<CompletedPart> completedParts = uploadParts(tempFile, chunkSize, uploadId, objectKey, jobId);
+            
+            // 更新状态：正在完成上传
+            updateProgress(jobId, ASYNC_STATUS_UPLOADING, 90.0, "Completing upload...", completedParts.size());
+            
+            // 完成分片上传
+            CompleteMultipartUploadRequest completeRequest = CompleteMultipartUploadRequest.builder()
+                    .bucket(s3Config.getBucket())
+                    .key(objectKey)
+                    .uploadId(uploadId)
+                    .multipartUpload(CompletedMultipartUpload.builder().parts(completedParts).build())
+                    .build();
+            
+            CompleteMultipartUploadResponse completeResponse = s3Client.completeMultipartUpload(completeRequest);
+            log.info("MinIO multipart upload completed with ETag: {}", completeResponse.eTag());
+            
+            // 更新状态：正在保存元数据
+            updateProgress(jobId, ASYNC_STATUS_UPLOADING, 95.0, "Saving metadata to database...", completedParts.size());
+            
+            // 获取对象元数据
+            HeadObjectRequest headRequest = HeadObjectRequest.builder()
+                    .bucket(s3Config.getBucket())
+                    .key(objectKey)
+                    .build();
+            HeadObjectResponse headResponse = s3Client.headObject(headRequest);
+            
+            // 保存视频录制元数据到数据库
+            String filename = file.getOriginalFilename();
+            VideoRecording recording = VideoRecording.builder()
+                    .filename(filename)
+                    .size(headResponse.contentLength())
+                    .objectKey(objectKey)
+                    .status(STATUS_COMPLETED)
+                    .checksum(completeResponse.eTag())
+                    .build();
+            
+            VideoRecording savedRecording = videoRecordingRepository.save(recording);
+            log.info("Video recording metadata saved to database with id: {}", savedRecording.getId());
+            
+            // 生成下载URL
+            String downloadUrl = generateDownloadUrl(objectKey);
+            
+            // 创建完成响应
+            CompleteUploadResponse uploadResponse = new CompleteUploadResponse(
+                    savedRecording.getId(),
+                    savedRecording.getFilename(),
+                    savedRecording.getSize(),
+                    savedRecording.getObjectKey(),
+                    savedRecording.getStatus(),
+                    downloadUrl,
+                    savedRecording.getCreatedAt()
+            );
+            
+            // 更新状态：完成
+            AsyncUploadProgress finalProgress = AsyncUploadProgress.builder()
+                    .jobId(jobId)
+                    .status(ASYNC_STATUS_COMPLETED)
+                    .progress(100.0)
+                    .message("Upload completed successfully")
+                    .uploadedParts(completedParts.size())
+                    .totalParts(completedParts.size())
+                    .fileName(filename)
+                    .fileSize(file.getSize())
+                    .uploadResponse(uploadResponse)
+                    .startTime(asyncUploadProgressMap.get(jobId).getStartTime())
+                    .endTime(Instant.now())
+                    .build();
+            asyncUploadProgressMap.put(jobId, finalProgress);
+            
+            log.info("Async upload job completed successfully: {}", jobId);
+            
+        } catch (Exception e) {
+            log.error("Async upload job failed: {}", jobId, e);
+            
+            // 尝试中止上传
+            if (uploadId != null && objectKey != null) {
+                try {
+                    abortUpload(new AbortUploadRequest(uploadId, objectKey));
+                    log.info("Cleaned up failed async upload: {}", jobId);
+                } catch (Exception cleanupException) {
+                    log.error("Failed to cleanup async upload: {}", jobId, cleanupException);
+                }
+            }
+            
+            // 更新状态：失败
+            AsyncUploadProgress progress = asyncUploadProgressMap.get(jobId);
+            if (progress != null) {
+                AsyncUploadProgress failedProgress = AsyncUploadProgress.builder()
+                        .jobId(jobId)
+                        .status(ASYNC_STATUS_FAILED)
+                        .progress(-1.0)
+                        .message("Upload failed: " + e.getMessage())
+                        .uploadedParts(progress.getUploadedParts())
+                        .totalParts(progress.getTotalParts())
+                        .fileName(progress.getFileName())
+                        .fileSize(progress.getFileSize())
+                        .startTime(progress.getStartTime())
+                        .endTime(Instant.now())
+                        .build();
+                asyncUploadProgressMap.put(jobId, failedProgress);
+            }
+        } finally {
+            // 清理临时文件
+            if (tempFile != null) {
+                try {
+                    Files.deleteIfExists(tempFile);
+                    log.info("Temporary file deleted: {}", tempFile);
+                } catch (IOException e) {
+                    log.warn("Failed to delete temporary file: {}", tempFile, e);
+                }
+            }
+            
+            // 60分钟后清理进度信息
+            CompletableFuture.delayedExecutor(60, java.util.concurrent.TimeUnit.MINUTES)
+                    .execute(() -> asyncUploadProgressMap.remove(jobId));
+        }
+    }
+    
+    /**
+     * 上传文件分片到MinIO
+     * 
+     * @param filePath 临时文件路径
+     * @param chunkSize 分片大小
+     * @param uploadId MinIO上传ID
+     * @param objectKey 对象键
+     * @param jobId 任务ID
+     * @return 已完成的分片列表
+     * @throws IOException 如果读取文件失败
+     */
+    private List<CompletedPart> uploadParts(Path filePath, long chunkSize, String uploadId, String objectKey, String jobId) throws IOException {
+        List<CompletedPart> completedParts = new ArrayList<>();
+        long fileSize = Files.size(filePath);
+        int totalParts = (int) Math.ceil((double) fileSize / chunkSize);
+        
+        log.info("Starting to upload {} parts for job: {}", totalParts, jobId);
+        
+        try (RandomAccessFile file = new RandomAccessFile(filePath.toFile(), "r")) {
+            byte[] buffer = new byte[(int) Math.min(chunkSize, fileSize)];
+            int partNumber = 1;
+            long offset = 0;
+            
+            while (offset < fileSize) {
+                // 计算当前分片的大小
+                long currentChunkSize = Math.min(chunkSize, fileSize - offset);
+                
+                // 读取分片数据
+                file.seek(offset);
+                int bytesRead = file.read(buffer, 0, (int) currentChunkSize);
+                
+                if (bytesRead <= 0) {
+                    break;
+                }
+                
+                // 上传分片到MinIO
+                UploadPartRequest uploadPartRequest = UploadPartRequest.builder()
+                        .bucket(s3Config.getBucket())
+                        .key(objectKey)
+                        .uploadId(uploadId)
+                        .partNumber(partNumber)
+                        .contentLength((long) bytesRead)
+                        .build();
+                
+                UploadPartResponse uploadPartResponse = s3Client.uploadPart(
+                        uploadPartRequest,
+                        RequestBody.fromBytes(Arrays.copyOf(buffer, bytesRead))
+                );
+                
+                // 记录已完成的分片
+                CompletedPart completedPart = CompletedPart.builder()
+                        .partNumber(partNumber)
+                        .eTag(uploadPartResponse.eTag())
+                        .build();
+                completedParts.add(completedPart);
+                
+                // 更新进度
+                double progress = 15.0 + (75.0 * partNumber / totalParts); // 15% - 90%
+                String message = String.format("Uploading part %d/%d...", partNumber, totalParts);
+                updateProgress(jobId, ASYNC_STATUS_UPLOADING, progress, message, partNumber);
+                
+                log.debug("Uploaded part {}/{} for job: {}, ETag: {}", partNumber, totalParts, jobId, uploadPartResponse.eTag());
+                
+                offset += bytesRead;
+                partNumber++;
+            }
+        }
+        
+        log.info("All {} parts uploaded successfully for job: {}", completedParts.size(), jobId);
+        return completedParts;
+    }
+    
+    /**
+     * 更新异步上传进度
+     * 
+     * @param jobId 任务ID
+     * @param status 状态
+     * @param progress 进度百分比
+     * @param message 消息
+     * @param uploadedParts 已上传的分片数
+     */
+    private void updateProgress(String jobId, String status, Double progress, String message, Integer uploadedParts) {
+        AsyncUploadProgress currentProgress = asyncUploadProgressMap.get(jobId);
+        if (currentProgress != null) {
+            AsyncUploadProgress updatedProgress = AsyncUploadProgress.builder()
+                    .jobId(jobId)
+                    .status(status)
+                    .progress(progress)
+                    .message(message)
+                    .uploadedParts(uploadedParts)
+                    .totalParts(currentProgress.getTotalParts())
+                    .fileName(currentProgress.getFileName())
+                    .fileSize(currentProgress.getFileSize())
+                    .startTime(currentProgress.getStartTime())
+                    .build();
+            asyncUploadProgressMap.put(jobId, updatedProgress);
+        }
+    }
+    
+    /**
+     * 获取异步上传任务的进度
+     * 
+     * @param jobId 任务ID
+     * @return 上传进度，如果任务不存在则返回null
+     */
+    public AsyncUploadProgress getAsyncUploadProgress(String jobId) {
+        log.debug("Retrieving progress for async upload job: {}", jobId);
+        return asyncUploadProgressMap.get(jobId);
     }
 }
