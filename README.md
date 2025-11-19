@@ -9,8 +9,12 @@ A Spring Boot demo service for resumable multipart uploads to local MinIO with m
 - Upload progress tracking
 - Upload completion with metadata persistence
 - Upload abortion and cleanup
-- **Async Chunk Upload to MinIO** - NEW!
+- **Async Chunk Upload to MinIO with Resume Support** - ENHANCED!
   - Backend automatically handles file chunking and upload to MinIO
+  - **Breakpoint Resume**: Resume interrupted uploads from where they left off
+  - **Persistent Storage**: Upload state saved to database, survives application restarts
+  - **Automatic Recovery**: Unfinished uploads automatically marked as PAUSED on restart
+  - **Smart Resume**: Only uploads missing chunks, saves time and bandwidth
   - No need for frontend to manage chunks
   - Real-time upload progress tracking
   - Automatic error handling and cleanup
@@ -21,7 +25,7 @@ A Spring Boot demo service for resumable multipart uploads to local MinIO with m
   - Synchronous and asynchronous processing
   - Real-time compression progress monitoring
   - Optimized for screen recording content
-- H2 in-memory database for demo purposes
+- MySQL database for persistent metadata storage
 - CORS enabled for cross-origin requests
 
 ## Prerequisites
@@ -361,8 +365,46 @@ curl http://localhost:8080/api/uploads/async/$JOB_ID/progress
 **Status Values**:
 - `SUBMITTED`: Job submitted, waiting to start
 - `UPLOADING`: Upload in progress
+- `PAUSED`: Upload paused, can be resumed
 - `COMPLETED`: Upload completed successfully
 - `FAILED`: Upload failed
+
+### 9. Resume Async Upload (NEW! - Breakpoint Resume)
+
+**Endpoint**: `POST /api/uploads/async/{jobId}/resume`
+
+Resume a paused or failed upload from where it left off. This enables true breakpoint resume functionality.
+
+**Use Cases**:
+- Network interruption during upload
+- Application restart while upload was in progress
+- Upload failure with partial completion
+- Manual pause and resume
+
+**Response**:
+```json
+{
+  "jobId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "UPLOADING",
+  "progress": 45.5,
+  "message": "Resuming upload...",
+  "uploadedParts": 7,
+  "totalParts": 15,
+  "fileName": "video.mp4",
+  "fileSize": 125829120,
+  "startTime": "2024-11-19T10:30:00Z"
+}
+```
+
+**Status Requirements**:
+- Task must be in `PAUSED` or `FAILED` status
+- Temporary file must exist
+- MinIO upload session must be valid
+
+**cURL Example**:
+```bash
+curl -X POST http://localhost:8080/api/uploads/async/{jobId}/resume
+```
 
 ## Upload Workflows
 
@@ -397,14 +439,42 @@ while true; do
 done
 ```
 
+**Step 3: Resume Upload (if interrupted)**
+```bash
+# Check if upload is paused or failed
+STATUS=$(curl -s http://localhost:8080/api/uploads/async/$JOB_ID/progress | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+
+if [ "$STATUS" = "PAUSED" ] || [ "$STATUS" = "FAILED" ]; then
+  echo "Upload interrupted, resuming..."
+  curl -X POST http://localhost:8080/api/uploads/async/$JOB_ID/resume
+  
+  # Continue polling
+  while true; do
+    PROGRESS=$(curl -s http://localhost:8080/api/uploads/async/$JOB_ID/progress)
+    STATUS=$(echo $PROGRESS | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+    echo "Status: $STATUS"
+    
+    if [ "$STATUS" = "COMPLETED" ] || [ "$STATUS" = "FAILED" ]; then
+      echo $PROGRESS | python3 -m json.tool
+      break
+    fi
+    
+    sleep 2
+  done
+fi
+```
+
 **Benefits**:
 - ✅ No need to handle file chunking on frontend
 - ✅ No need to manage presigned URLs
 - ✅ Automatic error handling and cleanup
 - ✅ Real-time progress tracking
+- ✅ **Breakpoint resume support** - Resume from where it left off
+- ✅ **Persistent storage** - Survives application restarts
+- ✅ **Smart resume** - Only uploads missing chunks
 - ✅ Simpler frontend code
 
-See [ASYNC_UPLOAD_GUIDE.md](ASYNC_UPLOAD_GUIDE.md) for detailed documentation and examples.
+See [ASYNC_UPLOAD_GUIDE.md](ASYNC_UPLOAD_GUIDE.md) and [RESUME_UPLOAD_GUIDE.md](RESUME_UPLOAD_GUIDE.md) for detailed documentation and examples.
 
 ## Complete Upload Workflow Example
 

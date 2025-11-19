@@ -125,6 +125,13 @@ upload:
   # 过长：安全风险增加
   # 建议值：60-1440（1小时到1天）
   presigned-url-expiration-minutes: ${PRESIGNED_URL_EXPIRATION:60}
+  
+  # 异步上传临时文件存储目录
+  # 用于存储正在上传的文件，支持断点续传功能
+  # Linux/Docker：/tmp/async-uploads
+  # Windows：D://ruoyi/async-uploads
+  # 注意：此目录应有足够的磁盘空间存储上传中的文件
+  temp-directory: ${UPLOAD_TEMP_DIR:D://ruoyi/async-uploads}
 
 # ============================================================
 # 服务器配置
