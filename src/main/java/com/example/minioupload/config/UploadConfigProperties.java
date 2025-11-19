@@ -53,4 +53,14 @@ public class UploadConfigProperties {
      * 需要在安全性（较短过期时间）和用户体验（较长过期时间以适应慢速上传）之间取得平衡。
      */
     private int presignedUrlExpirationMinutes;
+    
+    /**
+     * 异步上传临时文件存储目录。
+     * 
+     * 用于存储正在上传的文件，支持断点续传功能。
+     * 默认值：/tmp/async-uploads（Linux/Docker）或 D://ruoyi/async-uploads（Windows）
+     * 
+     * 注意：此目录应有足够的磁盘空间存储上传中的文件。
+     */
+    private String tempDirectory;
 }

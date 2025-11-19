@@ -171,7 +171,7 @@ public class MultipartUploadController {
      * 
      * 客户端可以定期轮询此端点来获取上传任务的实时状态和进度。
      * 进度信息包括：
-     * - 任务状态（SUBMITTED、UPLOADING、COMPLETED、FAILED）
+     * - 任务状态（SUBMITTED、UPLOADING、PAUSED、COMPLETED、FAILED）
      * - 进度百分比（0-100）
      * - 已上传的分片数和总分片数
      * - 详细的状态消息
@@ -191,5 +191,37 @@ public class MultipartUploadController {
         }
         
         return ResponseEntity.ok(progress);
+    }
+    
+    /**
+     * 恢复暂停的异步上传任务（断点续传）。
+     * 
+     * 此端点用于恢复之前中断或暂停的上传任务。它会：
+     * 1. 验证任务状态是否可以恢复（PAUSED或FAILED状态）
+     * 2. 检查临时文件是否存在
+     * 3. 查询MinIO中已上传的分片
+     * 4. 只上传剩余未完成的分片
+     * 5. 完成上传并保存元数据
+     * 
+     * 使用场景：
+     * - 网络中断后恢复上传
+     * - 应用重启后继续上传
+     * - 用户主动暂停后恢复上传
+     * - 上传失败后重试
+     * 
+     * @param jobId 要恢复的上传任务ID
+     * @return 恢复后的AsyncUploadProgress对象，包含当前状态和进度
+     */
+    @PostMapping("/async/{jobId}/resume")
+    public ResponseEntity<AsyncUploadProgress> resumeAsyncUpload(@PathVariable String jobId) {
+        log.info("POST /api/uploads/async/{}/resume - Resuming upload", jobId);
+        
+        try {
+            AsyncUploadProgress progress = multipartUploadService.resumeAsyncUpload(jobId);
+            return ResponseEntity.ok(progress);
+        } catch (IllegalArgumentException e) {
+            log.warn("Failed to resume upload {}: {}", jobId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        }
     }
 }
