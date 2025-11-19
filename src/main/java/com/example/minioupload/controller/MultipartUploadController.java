@@ -134,4 +134,62 @@ public class MultipartUploadController {
         multipartUploadService.abortUpload(request);
         return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
     }
+    
+    /**
+     * 提交异步分片上传任务。
+     * 
+     * 此端点接收整个文件，然后在后台异步执行分片上传到MinIO。
+     * 客户端将收到一个任务ID（jobId），可以使用该ID查询上传进度。
+     * 
+     * 与传统的分片上传流程不同：
+     * - 无需前端计算分片并逐个上传
+     * - 后端自动处理文件分片和上传
+     * - 支持实时进度查询
+     * - 上传完成后自动保存元数据到数据库
+     * 
+     * @param file 要上传的文件（MultipartFile）
+     * @param chunkSize 可选的自定义分片大小（字节），默认使用配置的默认值
+     * @return 包含任务ID的响应，客户端可使用该ID查询进度
+     */
+    @PostMapping("/async")
+    public ResponseEntity<AsyncUploadProgress> submitAsyncUpload(
+            @RequestPart("file") MultipartFile file,
+            @RequestParam(value = "chunkSize", required = false) Long chunkSize) {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("File cannot be empty");
+        }
+        log.info("POST /api/uploads/async - Submitting async upload for file: {}", file.getOriginalFilename());
+        
+        String jobId = multipartUploadService.submitAsyncUpload(file, chunkSize);
+        AsyncUploadProgress progress = multipartUploadService.getAsyncUploadProgress(jobId);
+        
+        return ResponseEntity.ok(progress);
+    }
+    
+    /**
+     * 查询异步上传任务的进度。
+     * 
+     * 客户端可以定期轮询此端点来获取上传任务的实时状态和进度。
+     * 进度信息包括：
+     * - 任务状态（SUBMITTED、UPLOADING、COMPLETED、FAILED）
+     * - 进度百分比（0-100）
+     * - 已上传的分片数和总分片数
+     * - 详细的状态消息
+     * - 上传完成后的文件信息和下载URL
+     * 
+     * @param jobId 上传任务的唯一标识符（从提交接口获得）
+     * @return 包含任务进度和状态的AsyncUploadProgress对象，如果任务不存在则返回404
+     */
+    @GetMapping("/async/{jobId}/progress")
+    public ResponseEntity<AsyncUploadProgress> getAsyncUploadProgress(@PathVariable String jobId) {
+        log.info("GET /api/uploads/async/{}/progress - Retrieving progress", jobId);
+        
+        AsyncUploadProgress progress = multipartUploadService.getAsyncUploadProgress(jobId);
+        if (progress == null) {
+            log.warn("Async upload job not found: {}", jobId);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
+        
+        return ResponseEntity.ok(progress);
+    }
 }

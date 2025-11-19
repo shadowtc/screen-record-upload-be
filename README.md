@@ -9,7 +9,13 @@ A Spring Boot demo service for resumable multipart uploads to local MinIO with m
 - Upload progress tracking
 - Upload completion with metadata persistence
 - Upload abortion and cleanup
-- **FFmpeg Video Compression Service** - NEW!
+- **Async Chunk Upload to MinIO** - NEW!
+  - Backend automatically handles file chunking and upload to MinIO
+  - No need for frontend to manage chunks
+  - Real-time upload progress tracking
+  - Automatic error handling and cleanup
+  - Simplified API - just upload the file and poll progress
+- **FFmpeg Video Compression Service**
   - MP4 video compression with customizable parameters
   - Multiple preset configurations (high-quality, balanced, high-compression, screen-recording)
   - Synchronous and asynchronous processing
@@ -267,6 +273,138 @@ curl -X POST http://localhost:8080/api/uploads/abort \
     "objectKey": "uploads/uuid/video.mp4"
   }'
 ```
+
+### 7. Submit Async Upload (NEW!)
+
+**Endpoint**: `POST /api/uploads/async`
+
+Submits a file for automatic background chunking and upload to MinIO. The backend handles all chunking logic.
+
+**Request Parameters**:
+- `file`: The video file (multipart form-data)
+- `chunkSize` (optional): Custom chunk size in bytes (default: 8MB)
+
+**Response**:
+```json
+{
+  "jobId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "SUBMITTED",
+  "progress": 0.0,
+  "message": "Upload submitted, waiting to start...",
+  "uploadedParts": 0,
+  "totalParts": 15,
+  "fileName": "video.mp4",
+  "fileSize": 125829120,
+  "startTime": "2024-11-19T10:30:00Z"
+}
+```
+
+**cURL Example**:
+```bash
+curl -X POST http://localhost:8080/api/uploads/async \
+  -F "file=@test-video.mp4" \
+  -F "chunkSize=8388608"
+```
+
+### 8. Get Async Upload Progress (NEW!)
+
+**Endpoint**: `GET /api/uploads/async/{jobId}/progress`
+
+Query the real-time progress of an async upload job.
+
+**Response (In Progress)**:
+```json
+{
+  "jobId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "UPLOADING",
+  "progress": 45.5,
+  "message": "Uploading part 7/15...",
+  "uploadedParts": 7,
+  "totalParts": 15,
+  "fileName": "video.mp4",
+  "fileSize": 125829120,
+  "startTime": "2024-11-19T10:30:00Z"
+}
+```
+
+**Response (Completed)**:
+```json
+{
+  "jobId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "COMPLETED",
+  "progress": 100.0,
+  "message": "Upload completed successfully",
+  "uploadedParts": 15,
+  "totalParts": 15,
+  "fileName": "video.mp4",
+  "fileSize": 125829120,
+  "startTime": "2024-11-19T10:30:00Z",
+  "endTime": "2024-11-19T10:32:30Z",
+  "uploadResponse": {
+    "id": 123,
+    "filename": "video.mp4",
+    "size": 125829120,
+    "objectKey": "uploads/uuid/video.mp4",
+    "status": "COMPLETED",
+    "downloadUrl": "https://minio:9000/...",
+    "createdAt": "2024-11-19T10:32:30Z"
+  }
+}
+```
+
+**cURL Example**:
+```bash
+JOB_ID="a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+curl http://localhost:8080/api/uploads/async/$JOB_ID/progress
+```
+
+**Status Values**:
+- `SUBMITTED`: Job submitted, waiting to start
+- `UPLOADING`: Upload in progress
+- `COMPLETED`: Upload completed successfully
+- `FAILED`: Upload failed
+
+## Upload Workflows
+
+### Async Upload Workflow (Simplified - Recommended for New Integrations)
+
+This is the simplest way to upload files - just send the file and poll for progress!
+
+**Step 1: Submit Upload**
+```bash
+./test-async-upload.sh
+# Or manually:
+RESPONSE=$(curl -X POST http://localhost:8080/api/uploads/async \
+  -F "file=@test-video.mp4" \
+  -F "chunkSize=8388608")
+JOB_ID=$(echo $RESPONSE | grep -o '"jobId":"[^"]*"' | cut -d'"' -f4)
+echo "Job ID: $JOB_ID"
+```
+
+**Step 2: Poll Progress (every 2-5 seconds)**
+```bash
+while true; do
+  PROGRESS=$(curl -s http://localhost:8080/api/uploads/async/$JOB_ID/progress)
+  STATUS=$(echo $PROGRESS | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+  echo "Status: $STATUS"
+  
+  if [ "$STATUS" = "COMPLETED" ] || [ "$STATUS" = "FAILED" ]; then
+    echo $PROGRESS | python3 -m json.tool
+    break
+  fi
+  
+  sleep 2
+done
+```
+
+**Benefits**:
+- ✅ No need to handle file chunking on frontend
+- ✅ No need to manage presigned URLs
+- ✅ Automatic error handling and cleanup
+- ✅ Real-time progress tracking
+- ✅ Simpler frontend code
+
+See [ASYNC_UPLOAD_GUIDE.md](ASYNC_UPLOAD_GUIDE.md) for detailed documentation and examples.
 
 ## Complete Upload Workflow Example
 
