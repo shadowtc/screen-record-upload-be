@@ -68,4 +68,19 @@ public class AsyncConfig {
         
         return executor;
     }
+
+    /**
+     * 服务端分片上传专用线程池
+     */
+    @Bean(name = "multipartUploadExecutor")
+    public Executor multipartUploadExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(200);
+        executor.setThreadNamePrefix("MultipartUpload-");
+        executor.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy());
+        executor.initialize();
+        return executor;
+    }
 }

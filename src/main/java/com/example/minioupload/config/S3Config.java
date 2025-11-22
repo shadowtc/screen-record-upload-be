@@ -8,6 +8,7 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 import java.net.URI;
@@ -65,12 +66,17 @@ public class S3Config {
                 s3ConfigProperties.getSecretKey()
         );
 
+        // S3服务配置（启用路径样式访问以兼容MinIO）
+        S3Configuration serviceConfig = S3Configuration.builder()
+                .pathStyleAccessEnabled(s3ConfigProperties.isPathStyleAccess())
+                .build();
+
         // 构建和配置S3客户端
         S3Client client = S3Client.builder()
                 .endpointOverride(URI.create(s3ConfigProperties.getEndpoint()))
                 .region(Region.of(s3ConfigProperties.getRegion()))
                 .credentialsProvider(StaticCredentialsProvider.create(credentials))
-                .forcePathStyle(s3ConfigProperties.isPathStyleAccess())
+                .serviceConfiguration(serviceConfig)
                 .build();
         
         log.info("S3Client initialized successfully");
@@ -91,9 +97,7 @@ public class S3Config {
      * - 用于MinIO兼容性的自定义端点
      * - AWS区域设置
      * - 静态凭证（访问密钥 + 秘密密钥）
-     * 
-     * 注意：与S3Client不同，S3Presigner不支持forcePathStyle()方法，
-     * 但在正确配置端点后可以正常与MinIO配合工作。
+     * - MinIO的路径样式访问（确保预签名URL为 path-style）
      * 
      * @return 配置好的S3Presigner实例
      */
@@ -107,11 +111,17 @@ public class S3Config {
                 s3ConfigProperties.getSecretKey()
         );
 
+        // S3服务配置（启用路径样式访问以兼容MinIO）
+        S3Configuration serviceConfig = S3Configuration.builder()
+                .pathStyleAccessEnabled(s3ConfigProperties.isPathStyleAccess())
+                .build();
+
         // 构建和配置S3预签名器
         S3Presigner presigner = S3Presigner.builder()
                 .endpointOverride(URI.create(s3ConfigProperties.getEndpoint()))
                 .region(Region.of(s3ConfigProperties.getRegion()))
                 .credentialsProvider(StaticCredentialsProvider.create(credentials))
+                .serviceConfiguration(serviceConfig)
                 .build();
         
         log.info("S3Presigner initialized successfully");

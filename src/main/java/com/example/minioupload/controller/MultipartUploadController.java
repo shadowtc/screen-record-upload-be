@@ -35,6 +35,7 @@ public class MultipartUploadController {
      * 处理分片上传业务逻辑的服务层
      */
     private final MultipartUploadService multipartUploadService;
+    private final com.example.minioupload.service.ServerSideMultipartUploadService serverSideMultipartUploadService;
 
     /**
      * 初始化新的分片上传会话。
@@ -58,6 +59,35 @@ public class MultipartUploadController {
         InitUploadRequest request = new InitUploadRequest(file, chunkSize);
         InitUploadResponse response = multipartUploadService.initializeUpload(request);
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 新增：服务端异步分片上传入口
+     * 前端仅需上传文件，后端异步分片并上传到MinIO
+     */
+    @PostMapping("/server/async")
+    public ResponseEntity<com.example.minioupload.dto.AsyncUploadStartResponse> serverSideAsyncUpload(
+            @RequestPart("file") MultipartFile file,
+            @RequestParam(value = "chunkSize", required = false) Long chunkSize) throws Exception {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("File cannot be empty");
+        }
+        // 将文件保存到临时目录，避免请求结束后临时文件被清理导致异步任务无法读取
+        java.nio.file.Path tempFile = java.nio.file.Files.createTempFile("server-upload-", "-" + file.getOriginalFilename());
+        file.transferTo(tempFile.toFile());
+        
+        com.example.minioupload.dto.AsyncUploadStartResponse response = serverSideMultipartUploadService
+                .submitAsyncUpload(tempFile, file.getOriginalFilename(), file.getContentType(), chunkSize);
+        return ResponseEntity.accepted().body(response);
+    }
+
+    /**
+     * 新增：查询服务端异步分片上传状态
+     */
+    @GetMapping("/server/status/{jobId}")
+    public ResponseEntity<com.example.minioupload.dto.AsyncUploadStatusResponse> getServerUploadStatus(@PathVariable String jobId) {
+        com.example.minioupload.dto.AsyncUploadStatusResponse status = serverSideMultipartUploadService.getStatus(jobId);
+        return ResponseEntity.ok(status);
     }
 
     /**
