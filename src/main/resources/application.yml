@@ -389,6 +389,13 @@ pdf:
     # 默认值：300（5分钟）
     timeout-seconds: ${PDF_TIMEOUT:300}
     
+    # Word文档转PDF的转换模式
+    # LIBREOFFICE_FIRST（推荐）：优先使用LibreOffice，失败则降级到图像渲染
+    # LIBREOFFICE_ONLY：仅使用LibreOffice，未安装则报错（最佳质量）
+    # IMAGE_ONLY：仅使用图像渲染（不需要LibreOffice，但PDF较大且无法搜索文本）
+    # LEGACY_TEXT：使用旧的文本提取方式（会丢失格式，不推荐）
+    word-conversion-mode: ${PDF_WORD_MODE:LIBREOFFICE_FIRST}
+    
     # 图片渲染配置
     image-rendering:
       # DPI设置，影响图片清晰度

@@ -47,6 +47,8 @@ public class PdfConversionService {
     
     private final PdfConversionProperties properties;
     private final PdfToImageService pdfToImageService;
+    private final LibreOfficeConversionService libreOfficeService;
+    private final WordToImageService wordToImageService;
     private final Executor videoCompressionExecutor;
     
     private final Map<String, PdfConversionProgress> progressMap = new ConcurrentHashMap<>();
@@ -60,15 +62,21 @@ public class PdfConversionService {
     public PdfConversionService(
             PdfConversionProperties properties,
             PdfToImageService pdfToImageService,
+            LibreOfficeConversionService libreOfficeService,
+            WordToImageService wordToImageService,
             @Qualifier("videoCompressionExecutor") Executor videoCompressionExecutor) {
         this.properties = properties;
         this.pdfToImageService = pdfToImageService;
+        this.libreOfficeService = libreOfficeService;
+        this.wordToImageService = wordToImageService;
         this.videoCompressionExecutor = videoCompressionExecutor;
         
         try {
             Files.createDirectories(Paths.get(properties.getTempDirectory()));
             log.info("PDF conversion service initialized with temp directory: {}", 
                 properties.getTempDirectory());
+            log.info("Word conversion mode: {}", properties.getWordConversionMode());
+            log.info("LibreOffice available: {}", libreOfficeService.isAvailable());
         } catch (IOException e) {
             log.error("Failed to create temp directory", e);
         }
@@ -261,6 +269,20 @@ public class PdfConversionService {
     }
     
     private void convertDocToPdf(File inputFile, File outputPdfFile) throws IOException {
+        if (libreOfficeService.isAvailable() && libreOfficeService.supportsFormat("doc")) {
+            try {
+                log.info("Converting DOC with LibreOffice");
+                File converted = libreOfficeService.convertToPdf(inputFile, outputPdfFile.getParentFile());
+                if (!converted.equals(outputPdfFile)) {
+                    Files.move(converted.toPath(), outputPdfFile.toPath(), 
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+                return;
+            } catch (Exception e) {
+                log.warn("LibreOffice conversion failed for DOC, using legacy method: {}", e.getMessage());
+            }
+        }
+        
         try (FileInputStream fis = new FileInputStream(inputFile);
              HWPFDocument doc = new HWPFDocument(fis);
              WordExtractor extractor = new WordExtractor(doc);
@@ -279,6 +301,77 @@ public class PdfConversionService {
     }
     
     private void convertDocxToPdf(File inputFile, File outputPdfFile) throws IOException {
+        PdfConversionProperties.WordConversionMode mode = properties.getWordConversionMode();
+        
+        log.info("Converting DOCX to PDF using mode: {}", mode);
+        
+        switch (mode) {
+            case LIBREOFFICE_ONLY:
+                convertDocxWithLibreOfficeOnly(inputFile, outputPdfFile);
+                break;
+            
+            case LIBREOFFICE_FIRST:
+                convertDocxWithLibreOfficeFirst(inputFile, outputPdfFile);
+                break;
+            
+            case IMAGE_ONLY:
+                convertDocxWithImageOnly(inputFile, outputPdfFile);
+                break;
+            
+            case LEGACY_TEXT:
+                convertDocxWithLegacyText(inputFile, outputPdfFile);
+                break;
+            
+            default:
+                convertDocxWithLibreOfficeFirst(inputFile, outputPdfFile);
+        }
+    }
+    
+    private void convertDocxWithLibreOfficeOnly(File inputFile, File outputPdfFile) throws IOException {
+        if (!libreOfficeService.isAvailable()) {
+            throw new IOException("LibreOffice is not available. " +
+                "Please install it with: sudo apt-get install -y libreoffice");
+        }
+        
+        File converted = libreOfficeService.convertToPdf(inputFile, outputPdfFile.getParentFile());
+        
+        if (!converted.equals(outputPdfFile)) {
+            Files.move(converted.toPath(), outputPdfFile.toPath(), 
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+    
+    private void convertDocxWithLibreOfficeFirst(File inputFile, File outputPdfFile) throws IOException {
+        if (libreOfficeService.isAvailable()) {
+            try {
+                log.info("Attempting DOCX conversion with LibreOffice");
+                File converted = libreOfficeService.convertToPdf(inputFile, outputPdfFile.getParentFile());
+                
+                if (!converted.equals(outputPdfFile)) {
+                    Files.move(converted.toPath(), outputPdfFile.toPath(), 
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+                log.info("DOCX conversion successful with LibreOffice");
+                return;
+            } catch (Exception e) {
+                log.warn("LibreOffice conversion failed, falling back to image-based conversion: {}", 
+                    e.getMessage());
+            }
+        } else {
+            log.info("LibreOffice not available, using image-based conversion");
+        }
+        
+        convertDocxWithImageOnly(inputFile, outputPdfFile);
+    }
+    
+    private void convertDocxWithImageOnly(File inputFile, File outputPdfFile) throws IOException {
+        log.info("Converting DOCX to PDF via image rendering");
+        wordToImageService.convertDocxToPdfViaImages(inputFile, outputPdfFile);
+    }
+    
+    private void convertDocxWithLegacyText(File inputFile, File outputPdfFile) throws IOException {
+        log.info("Converting DOCX to PDF using legacy text extraction method");
+        
         try (FileInputStream fis = new FileInputStream(inputFile);
              XWPFDocument docx = new XWPFDocument(fis);
              PdfWriter writer = new PdfWriter(outputPdfFile);
@@ -349,6 +442,20 @@ public class PdfConversionService {
     }
     
     private void convertXlsToPdf(File inputFile, File outputPdfFile) throws IOException {
+        if (libreOfficeService.isAvailable() && libreOfficeService.supportsFormat("xls")) {
+            try {
+                log.info("Converting XLS with LibreOffice");
+                File converted = libreOfficeService.convertToPdf(inputFile, outputPdfFile.getParentFile());
+                if (!converted.equals(outputPdfFile)) {
+                    Files.move(converted.toPath(), outputPdfFile.toPath(), 
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+                return;
+            } catch (Exception e) {
+                log.warn("LibreOffice conversion failed for XLS, using legacy method: {}", e.getMessage());
+            }
+        }
+        
         try (FileInputStream fis = new FileInputStream(inputFile);
              Workbook workbook = new HSSFWorkbook(fis);
              PdfWriter writer = new PdfWriter(outputPdfFile);
@@ -360,6 +467,20 @@ public class PdfConversionService {
     }
     
     private void convertXlsxToPdf(File inputFile, File outputPdfFile) throws IOException {
+        if (libreOfficeService.isAvailable() && libreOfficeService.supportsFormat("xlsx")) {
+            try {
+                log.info("Converting XLSX with LibreOffice");
+                File converted = libreOfficeService.convertToPdf(inputFile, outputPdfFile.getParentFile());
+                if (!converted.equals(outputPdfFile)) {
+                    Files.move(converted.toPath(), outputPdfFile.toPath(), 
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+                return;
+            } catch (Exception e) {
+                log.warn("LibreOffice conversion failed for XLSX, using legacy method: {}", e.getMessage());
+            }
+        }
+        
         try (FileInputStream fis = new FileInputStream(inputFile);
              Workbook workbook = new XSSFWorkbook(fis);
              PdfWriter writer = new PdfWriter(outputPdfFile);
@@ -415,6 +536,20 @@ public class PdfConversionService {
     }
     
     private void convertPptToPdf(File inputFile, File outputPdfFile) throws IOException {
+        if (libreOfficeService.isAvailable() && libreOfficeService.supportsFormat("ppt")) {
+            try {
+                log.info("Converting PPT with LibreOffice");
+                File converted = libreOfficeService.convertToPdf(inputFile, outputPdfFile.getParentFile());
+                if (!converted.equals(outputPdfFile)) {
+                    Files.move(converted.toPath(), outputPdfFile.toPath(), 
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+                return;
+            } catch (Exception e) {
+                log.warn("LibreOffice conversion failed for PPT, using legacy method: {}", e.getMessage());
+            }
+        }
+        
         try (FileInputStream fis = new FileInputStream(inputFile);
              HSLFSlideShow ppt = new HSLFSlideShow(fis)) {
             
@@ -423,6 +558,20 @@ public class PdfConversionService {
     }
     
     private void convertPptxToPdf(File inputFile, File outputPdfFile) throws IOException {
+        if (libreOfficeService.isAvailable() && libreOfficeService.supportsFormat("pptx")) {
+            try {
+                log.info("Converting PPTX with LibreOffice");
+                File converted = libreOfficeService.convertToPdf(inputFile, outputPdfFile.getParentFile());
+                if (!converted.equals(outputPdfFile)) {
+                    Files.move(converted.toPath(), outputPdfFile.toPath(), 
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+                return;
+            } catch (Exception e) {
+                log.warn("LibreOffice conversion failed for PPTX, using legacy method: {}", e.getMessage());
+            }
+        }
+        
         try (FileInputStream fis = new FileInputStream(inputFile);
              XMLSlideShow pptx = new XMLSlideShow(fis)) {
             
