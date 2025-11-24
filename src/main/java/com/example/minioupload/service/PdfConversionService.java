@@ -269,23 +269,80 @@ public class PdfConversionService {
              Document document = new Document(pdfDoc)) {
             
             String text = extractor.getText();
-            document.add(new Paragraph(text));
+            String[] paragraphs = text.split("\n");
+            for (String para : paragraphs) {
+                if (!para.trim().isEmpty()) {
+                    document.add(new Paragraph(para));
+                }
+            }
         }
     }
     
     private void convertDocxToPdf(File inputFile, File outputPdfFile) throws IOException {
         try (FileInputStream fis = new FileInputStream(inputFile);
              XWPFDocument docx = new XWPFDocument(fis);
-             XWPFWordExtractor extractor = new XWPFWordExtractor(docx);
              PdfWriter writer = new PdfWriter(outputPdfFile);
              PdfDocument pdfDoc = new PdfDocument(writer);
              Document document = new Document(pdfDoc)) {
             
-            String text = extractor.getText();
-            String[] paragraphs = text.split("\n");
-            for (String para : paragraphs) {
-                if (!para.trim().isEmpty()) {
-                    document.add(new Paragraph(para));
+            for (org.apache.poi.xwpf.usermodel.XWPFParagraph para : docx.getParagraphs()) {
+                String text = para.getText();
+                if (text != null && !text.trim().isEmpty()) {
+                    Paragraph pdfPara = new Paragraph(text);
+                    
+                    if (para.getStyle() != null) {
+                        String style = para.getStyle();
+                        if (style.contains("Heading") || style.contains("Title")) {
+                            pdfPara.setBold().setFontSize(16);
+                        }
+                    }
+                    
+                    String alignment = para.getAlignment() != null ? para.getAlignment().toString() : "";
+                    switch (alignment) {
+                        case "CENTER":
+                            pdfPara.setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER);
+                            break;
+                        case "RIGHT":
+                            pdfPara.setTextAlignment(com.itextpdf.layout.properties.TextAlignment.RIGHT);
+                            break;
+                        case "JUSTIFY":
+                        case "BOTH":
+                            pdfPara.setTextAlignment(com.itextpdf.layout.properties.TextAlignment.JUSTIFIED);
+                            break;
+                        default:
+                            pdfPara.setTextAlignment(com.itextpdf.layout.properties.TextAlignment.LEFT);
+                    }
+                    
+                    document.add(pdfPara);
+                }
+            }
+            
+            for (org.apache.poi.xwpf.usermodel.XWPFTable table : docx.getTables()) {
+                for (org.apache.poi.xwpf.usermodel.XWPFTableRow row : table.getRows()) {
+                    StringBuilder rowText = new StringBuilder();
+                    for (org.apache.poi.xwpf.usermodel.XWPFTableCell cell : row.getTableCells()) {
+                        String cellText = cell.getText();
+                        if (cellText != null && !cellText.isEmpty()) {
+                            rowText.append(cellText).append(" | ");
+                        }
+                    }
+                    if (rowText.length() > 0) {
+                        document.add(new Paragraph(rowText.toString()));
+                    }
+                }
+                document.add(new Paragraph(" "));
+            }
+            
+            for (org.apache.poi.xwpf.usermodel.XWPFPictureData picData : docx.getAllPictures()) {
+                try {
+                    byte[] imageData = picData.getData();
+                    if (imageData != null && imageData.length > 0) {
+                        Image pdfImage = new Image(ImageDataFactory.create(imageData));
+                        pdfImage.setAutoScale(true);
+                        document.add(pdfImage);
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to add image to PDF: {}", e.getMessage());
                 }
             }
         }
