@@ -112,6 +112,13 @@
             <version>2.15.1</version>
         </dependency>
 
+        <!-- Tomcat embed core (for ClientAbortException) -->
+        <dependency>
+            <groupId>org.apache.tomcat.embed</groupId>
+            <artifactId>tomcat-embed-core</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
         <!-- Lombok (optional, for cleaner code) -->
         <dependency>
             <groupId>org.projectlombok</groupId>
