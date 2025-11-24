@@ -21,6 +21,15 @@ public class PdfConversionProperties {
     
     private ImageRenderingConfig imageRendering = new ImageRenderingConfig();
     
+    private WordConversionMode wordConversionMode = WordConversionMode.LIBREOFFICE_FIRST;
+    
+    public enum WordConversionMode {
+        LIBREOFFICE_ONLY,
+        LIBREOFFICE_FIRST,
+        IMAGE_ONLY,
+        LEGACY_TEXT
+    }
+    
     @Data
     public static class ImageRenderingConfig {
         private int dpi = 300;
