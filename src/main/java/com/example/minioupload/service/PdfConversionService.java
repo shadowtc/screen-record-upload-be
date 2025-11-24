@@ -397,15 +397,13 @@ public class PdfConversionService {
                 BufferedImage slideImage = new BufferedImage(
                     pageSize.width, pageSize.height, BufferedImage.TYPE_INT_RGB);
                 Graphics2D graphics = slideImage.createGraphics();
-                graphics.setColor(Color.WHITE);
+                graphics.setColor(java.awt.Color.WHITE);
                 graphics.fillRect(0, 0, pageSize.width, pageSize.height);
                 
                 if (slideShow instanceof HSLFSlideShow) {
-                    ((HSLFSlideShow) slideShow).getSlides().get(i)
-                        .draw(graphics, new Rectangle2D.Float(0, 0, pageSize.width, pageSize.height));
+                    ((HSLFSlideShow) slideShow).getSlides().get(i).draw(graphics);
                 } else {
-                    ((XMLSlideShow) slideShow).getSlides().get(i)
-                        .draw(graphics, new Rectangle2D.Float(0, 0, pageSize.width, pageSize.height));
+                    ((XMLSlideShow) slideShow).getSlides().get(i).draw(graphics);
                 }
                 
                 graphics.dispose();
