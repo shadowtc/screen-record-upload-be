@@ -804,7 +804,8 @@ public class MultipartUploadService {
             log.info("File saved to temporary location: {}", tempFile);
             
             // 更新数据库中的临时文件路径
-            updateTaskInDatabase(jobId, task -> task.setTempFilePath(tempFile.toString()));
+            final Path finalTempFile = tempFile;
+            updateTaskInDatabase(jobId, task -> task.setTempFilePath(finalTempFile.toString()));
             
             // 更新状态：正在初始化MinIO上传
             updateProgress(jobId, ASYNC_STATUS_UPLOADING, 10.0, "Initializing MinIO upload...", 0);
