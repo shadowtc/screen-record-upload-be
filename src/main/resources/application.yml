@@ -362,3 +362,56 @@ video:
           recommended-bitrate: 15000000
           description: "Ultra High Definition"
 
+# ============================================================
+# PDF转换服务配置
+# ============================================================
+pdf:
+  conversion:
+    # 是否启用PDF转换功能
+    enabled: true
+    
+    # 临时目录路径
+    # 存储转换中和已完成的PDF文件及图片
+    # Linux/Docker：/tmp/pdf-conversion
+    # Windows：D://ruoyi/pdf-conversion
+    temp-directory: ${PDF_TEMP_DIR:D://ruoyi/pdf-conversion}
+    
+    # 最大并发转换任务数
+    # 超过此数值的新请求将被拒绝
+    # 根据CPU核心数和内存调整
+    max-concurrent-jobs: ${PDF_MAX_JOBS:3}
+    
+    # 单个文件最大大小限制（字节）
+    # 默认值：104857600（100MB）
+    max-file-size: ${PDF_MAX_SIZE:104857600}
+    
+    # 单个转换任务超时时间（秒）
+    # 默认值：300（5分钟）
+    timeout-seconds: ${PDF_TIMEOUT:300}
+    
+    # 图片渲染配置
+    image-rendering:
+      # DPI设置，影响图片清晰度
+      # 默认值：300（高质量打印级别）
+      # 72：屏幕显示
+      # 150：标准打印
+      # 300：高质量打印（推荐）
+      # 600：专业级打印
+      dpi: ${PDF_IMAGE_DPI:300}
+      
+      # 图片格式
+      # 支持：PNG（推荐）, JPG, BMP
+      format: ${PDF_IMAGE_FORMAT:PNG}
+      
+      # 图片质量（0.0-1.0）
+      quality: ${PDF_IMAGE_QUALITY:1.0}
+      
+      # 是否启用抗锯齿
+      antialiasing: ${PDF_IMAGE_ANTIALIASING:true}
+      
+      # 是否渲染文本
+      render-text: ${PDF_RENDER_TEXT:true}
+      
+      # 是否渲染图片
+      render-images: ${PDF_RENDER_IMAGES:true}
+
