@@ -5,7 +5,10 @@ spring:
   application:
     # 应用名称，用于Spring Boot管理和监控
     name: minio-multipart-upload
-  
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
   # 数据源配置
   datasource:
     # JDBC连接字符串
