@@ -29,6 +29,27 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
+/**
+ * PDF上传与转换服务
+ * 
+ * 核心功能：
+ * 1. PDF文件上传和验证
+ * 2. PDF页面转图片（全量转换和增量转换）
+ * 3. 任务进度查询
+ * 4. 图片分页查询
+ * 5. 增量转换图片合并
+ * 
+ * 业务流程：
+ * 1. 全量转换：上传PDF -> 转换所有页面 -> 保存图片 -> 标记为基础转换（isBase=true）
+ * 2. 增量转换：上传PDF -> 只转换指定页面 -> 保存图片 -> 标记为增量转换（isBase=false）
+ * 3. 图片查询：按业务ID查询，增量转换的图片覆盖基础转换的同页码图片
+ * 
+ * 技术特点：
+ * - 异步处理：使用CompletableFuture进行后台转换
+ * - 事务管理：确保数据一致性
+ * - 进度跟踪：实时查询转换进度
+ * - 分页支持：支持大量页面的分页查询
+ */
 @Slf4j
 @Service
 public class PdfUploadService {
@@ -55,6 +76,21 @@ public class PdfUploadService {
         this.objectMapper = objectMapper;
     }
     
+    /**
+     * 上传PDF并转换为图片
+     * 
+     * 这是主入口方法，负责：
+     * 1. 参数验证（文件、业务ID、用户ID）
+     * 2. 文件格式验证（仅接受PDF）
+     * 3. 文件大小验证
+     * 4. 判断全量/增量转换模式
+     * 5. 创建任务记录
+     * 6. 启动异步转换
+     * 
+     * @param file PDF文件（MultipartFile）
+     * @param request 转换请求参数（业务ID、用户ID、页码等）
+     * @return 上传响应（包含任务ID和状态）
+     */
     @Transactional
     public PdfUploadResponse uploadPdfAndConvertToImages(MultipartFile file, PdfConversionTaskRequest request) {
         if (!properties.isEnabled()) {
@@ -149,9 +185,24 @@ public class PdfUploadService {
             .status("PROCESSING")
             .message("PDF upload successful. Converting to images in background.")
             .build();
-    }
-    
-    private void executePdfToImageConversion(MultipartFile file, PdfConversionTaskRequest request, String taskId) {
+            }
+
+            /**
+            * 执行PDF转图片转换（异步执行）
+            *
+            * 转换流程：
+            * 1. 保存上传的PDF文件到临时目录
+            * 2. 获取PDF总页数
+            * 3. 确定需要转换的页面（全量或增量）
+            * 4. 调用PdfToImageService进行页面渲染
+            * 5. 保存图片元数据到数据库
+            * 6. 更新任务状态
+            *
+            * @param file PDF文件
+            * @param request 转换请求
+            * @param taskId 任务ID
+            */
+            private void executePdfToImageConversion(MultipartFile file, PdfConversionTaskRequest request, String taskId) {
         long startTime = System.currentTimeMillis();
         
         try {
@@ -210,6 +261,21 @@ public class PdfUploadService {
         }
     }
     
+    /**
+     * 保存页面图片元数据到数据库
+     * 
+     * 为每个转换后的图片创建数据库记录，包含：
+     * - 任务ID、业务ID、用户ID
+     * - 页码、图片路径
+     * - 图片尺寸、文件大小
+     * - 是否为基础转换标识
+     * 
+     * @param taskId 任务ID
+     * @param businessId 业务ID
+     * @param userId 用户ID
+     * @param imageFiles 页码到图片路径的映射
+     * @param isBase 是否为基础转换
+     */
     @Transactional
     protected void savePageImages(String taskId, String businessId, String userId, 
                                    Map<Integer, String> imageFiles, boolean isBase) {
@@ -243,6 +309,13 @@ public class PdfUploadService {
         }
     }
     
+    /**
+     * 更新任务状态
+     * 
+     * @param taskId 任务ID
+     * @param status 新状态
+     * @param errorMessage 错误信息（可选）
+     */
     @Transactional
     protected void updateTaskStatus(String taskId, String status, String errorMessage) {
         Optional<PdfConversionTask> taskOpt = taskRepository.findByTaskId(taskId);
@@ -256,6 +329,12 @@ public class PdfUploadService {
         }
     }
     
+    /**
+     * 查询转换进度
+     * 
+     * @param taskId 任务ID
+     * @return 进度信息
+     */
     public PdfConversionProgress getProgress(String taskId) {
         Optional<PdfConversionTask> taskOpt = taskRepository.findByTaskId(taskId);
         if (taskOpt.isEmpty()) {
@@ -283,9 +362,15 @@ public class PdfUploadService {
             .totalPages(task.getTotalPages())
             .message(task.getErrorMessage())
             .build();
-    }
-    
-    public PdfConversionTaskResponse getTask(String taskId) {
+            }
+
+            /**
+            * 获取任务详情
+            *
+            * @param taskId 任务ID
+            * @return 任务响应信息，未找到时返回null
+            */
+            public PdfConversionTaskResponse getTask(String taskId) {
         Optional<PdfConversionTask> taskOpt = taskRepository.findByTaskId(taskId);
         if (taskOpt.isEmpty()) {
             return null;
@@ -317,6 +402,13 @@ public class PdfUploadService {
             .build();
     }
     
+    /**
+     * 查询任务列表
+     * 
+     * @param businessId 业务ID（可选）
+     * @param userId 用户ID（可选）
+     * @return 任务列表
+     */
     public List<PdfConversionTaskResponse> getTasks(String businessId, String userId) {
         List<PdfConversionTask> tasks;
         
@@ -333,6 +425,20 @@ public class PdfUploadService {
             .collect(Collectors.toList());
     }
     
+    /**
+     * 分页查询PDF页面图片
+     * 
+     * 查询逻辑：
+     * 1. 如果提供userId，则合并全量和增量转换的图片（增量覆盖全量）
+     * 2. 如果只提供businessId，只返回基础转换的图片
+     * 3. 支持分页查询，默认每页10条
+     * 
+     * @param businessId 业务ID（必填）
+     * @param userId 用户ID（可选）
+     * @param startPage 起始页码（从1开始）
+     * @param pageSize 每页大小
+     * @return 图片响应，包含分页信息和图片列表
+     */
     public PdfImageResponse getImages(String businessId, String userId, Integer startPage, Integer pageSize) {
         if (businessId == null || businessId.trim().isEmpty()) {
             return PdfImageResponse.builder()
@@ -412,9 +518,15 @@ public class PdfUploadService {
             .status("SUCCESS")
             .message("Successfully retrieved page images")
             .build();
-    }
-    
-    private PdfConversionTaskResponse convertToResponse(PdfConversionTask task) {
+            }
+
+            /**
+            * 将任务实体转换为响应DTO
+            *
+            * @param task 任务实体
+            * @return 任务响应DTO
+            */
+            private PdfConversionTaskResponse convertToResponse(PdfConversionTask task) {
         List<Integer> convertedPages = null;
         if (task.getConvertedPages() != null) {
             try {
