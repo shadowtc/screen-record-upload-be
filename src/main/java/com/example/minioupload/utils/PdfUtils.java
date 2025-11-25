@@ -1,6 +1,7 @@
 package com.example.minioupload.utils;
 
 import lombok.extern.slf4j.Slf4j;
+import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -113,12 +114,12 @@ public class PdfUtils {
      */
     private static PDFont loadChineseFont(PDDocument document, String text) {
         String resourcePath = "/fonts/NotoSansSC-VariableFont_wght.ttf";
-        try {
-            InputStream fontStream = PdfUtils.class.getResourceAsStream(resourcePath);
+        try (InputStream fontStream = PdfUtils.class.getResourceAsStream(resourcePath)) {
             if (fontStream == null) {
                 throw new RuntimeException("字体文件不存在：" + resourcePath + "，请确保字体文件存在于 resources/fonts/ 目录");
             }
             log.info("成功加载字体：{}", resourcePath);
+            // PDFBox 3.x: PDType0Font.load() 方法签名未变，但建议使用try-with-resources确保资源关闭
             return PDType0Font.load(document, fontStream);
         } catch (Exception e) {
             log.error("字体加载失败：{}", e.getMessage(), e);
@@ -211,7 +212,8 @@ public class PdfUtils {
     private static PDImageXObject createPDImageFromBytes(PDDocument document, byte[] imageBytes) throws IOException {
         try {
             // 尝试直接创建PDImageXObject
-            return PDImageXObject.createFromByteArray(document, imageBytes, "image");
+            // PDFBox 3.x: 第三个参数使用COSName而不是String
+            return PDImageXObject.createFromByteArray(document, imageBytes, COSName.getPDFName("image"));
         } catch (Exception e) {
             // 如果失败，尝试通过BufferedImage转换
             log.debug("直接创建PDImageXObject失败，尝试通过BufferedImage转换");
@@ -227,7 +229,8 @@ public class PdfUtils {
             javax.imageio.ImageIO.write(bufferedImage, "PNG", baos);
             byte[] pngBytes = baos.toByteArray();
             
-            return PDImageXObject.createFromByteArray(document, pngBytes, "image");
+            // PDFBox 3.x: 第三个参数使用COSName而不是String
+            return PDImageXObject.createFromByteArray(document, pngBytes, COSName.getPDFName("image"));
         }
     }
 }
