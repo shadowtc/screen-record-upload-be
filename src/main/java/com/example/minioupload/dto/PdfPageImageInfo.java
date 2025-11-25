@@ -26,6 +26,11 @@ public class PdfPageImageInfo {
     private String imageObjectKey;
     
     /**
+     * 图片预签名URL（用于直接访问）
+     */
+    private String imageUrl;
+    
+    /**
      * 是否为基础转换的图片
      * true表示来自全量转换，false表示来自增量转换
      */

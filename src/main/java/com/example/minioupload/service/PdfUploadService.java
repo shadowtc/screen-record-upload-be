@@ -56,6 +56,7 @@ public class PdfUploadService {
     
     private final PdfConversionProperties properties;
     private final PdfToImageService pdfToImageService;
+    private final MinioStorageService minioStorageService;
     private final Executor videoCompressionExecutor;
     private final PdfConversionTaskRepository taskRepository;
     private final PdfPageImageRepository pageImageRepository;
@@ -64,12 +65,14 @@ public class PdfUploadService {
     public PdfUploadService(
             PdfConversionProperties properties,
             PdfToImageService pdfToImageService,
+            MinioStorageService minioStorageService,
             @Qualifier("videoCompressionExecutor") Executor videoCompressionExecutor,
             PdfConversionTaskRepository taskRepository,
             PdfPageImageRepository pageImageRepository,
             ObjectMapper objectMapper) {
         this.properties = properties;
         this.pdfToImageService = pdfToImageService;
+        this.minioStorageService = minioStorageService;
         this.videoCompressionExecutor = videoCompressionExecutor;
         this.taskRepository = taskRepository;
         this.pageImageRepository = pageImageRepository;
@@ -192,11 +195,13 @@ public class PdfUploadService {
             *
             * 转换流程：
             * 1. 保存上传的PDF文件到临时目录
-            * 2. 获取PDF总页数
-            * 3. 确定需要转换的页面（全量或增量）
-            * 4. 调用PdfToImageService进行页面渲染
-            * 5. 保存图片元数据到数据库
-            * 6. 更新任务状态
+            * 2. 上传PDF到MinIO
+            * 3. 获取PDF总页数
+            * 4. 确定需要转换的页面（全量或增量）
+            * 5. 调用PdfToImageService进行页面渲染并上传到MinIO
+            * 6. 保存图片元数据到数据库
+            * 7. 更新任务状态
+            * 8. 清理临时文件
             *
             * @param file PDF文件
             * @param request 转换请求
@@ -204,19 +209,29 @@ public class PdfUploadService {
             */
             private void executePdfToImageConversion(MultipartFile file, PdfConversionTaskRequest request, String taskId) {
         long startTime = System.currentTimeMillis();
+        File pdfFile = null;
+        Path taskDir = null;
         
         try {
             updateTaskStatus(taskId, "PROCESSING", null);
             
-            Path taskDir = Paths.get(properties.getTempDirectory(), taskId);
+            taskDir = Paths.get(properties.getTempDirectory(), taskId);
             Files.createDirectories(taskDir);
             
-            File pdfFile = taskDir.resolve(file.getOriginalFilename()).toFile();
+            pdfFile = taskDir.resolve(file.getOriginalFilename()).toFile();
             file.transferTo(pdfFile);
+            
+            String pdfObjectKey = String.format("pdf/%s/%s/%s/%s", 
+                request.getUserId(), request.getBusinessId(), taskId, file.getOriginalFilename());
+            minioStorageService.uploadFile(pdfFile, pdfObjectKey);
+            log.info("PDF uploaded to MinIO: {}", pdfObjectKey);
+            
+            PdfConversionTask task = taskRepository.findByTaskId(taskId).orElseThrow();
+            task.setPdfObjectKey(pdfObjectKey);
+            taskRepository.save(task);
             
             int pageCount = pdfToImageService.getPageCount(pdfFile);
             
-            PdfConversionTask task = taskRepository.findByTaskId(taskId).orElseThrow();
             task.setTotalPages(pageCount);
             taskRepository.save(task);
             
@@ -242,22 +257,48 @@ public class PdfUploadService {
                 throw new IllegalArgumentException("No valid pages to convert");
             }
             
-            Map<Integer, String> imageFiles = pdfToImageService.convertSpecificPagesToImages(
-                pdfFile, taskId, pagesToConvert, dpi, format);
+            Map<Integer, String> minioObjectKeys = pdfToImageService.convertPagesToImagesAndUpload(
+                pdfFile, request.getUserId(), request.getBusinessId(), taskId, pagesToConvert, dpi, format);
             
             savePageImages(taskId, request.getBusinessId(), request.getUserId(), 
-                imageFiles, task.getIsBase());
+                minioObjectKeys, task.getIsBase());
             
             long processingTime = System.currentTimeMillis() - startTime;
             
             updateTaskStatus(taskId, "COMPLETED", null);
             
             log.info("PDF to images conversion completed for taskId: {} in {}ms, pages: {}, images: {}", 
-                taskId, processingTime, pagesToConvert.size(), imageFiles.size());
+                taskId, processingTime, pagesToConvert.size(), minioObjectKeys.size());
             
         } catch (Exception e) {
             log.error("PDF to images conversion failed for taskId: {}", taskId, e);
             updateTaskStatus(taskId, "FAILED", "Conversion failed: " + e.getMessage());
+        } finally {
+            if (pdfFile != null && pdfFile.exists()) {
+                try {
+                    Files.deleteIfExists(pdfFile.toPath());
+                    log.debug("Deleted temp PDF file: {}", pdfFile.getAbsolutePath());
+                } catch (IOException e) {
+                    log.warn("Failed to delete temp PDF file: {}", pdfFile.getAbsolutePath(), e);
+                }
+            }
+            
+            if (taskDir != null && Files.exists(taskDir)) {
+                try {
+                    Files.walk(taskDir)
+                        .sorted(Comparator.reverseOrder())
+                        .forEach(path -> {
+                            try {
+                                Files.deleteIfExists(path);
+                            } catch (IOException e) {
+                                log.warn("Failed to delete: {}", path, e);
+                            }
+                        });
+                    log.debug("Cleaned up temp directory: {}", taskDir);
+                } catch (IOException e) {
+                    log.warn("Failed to clean up temp directory: {}", taskDir, e);
+                }
+            }
         }
     }
     
@@ -266,46 +307,35 @@ public class PdfUploadService {
      * 
      * 为每个转换后的图片创建数据库记录，包含：
      * - 任务ID、业务ID、用户ID
-     * - 页码、图片路径
-     * - 图片尺寸、文件大小
+     * - 页码、MinIO对象键
      * - 是否为基础转换标识
      * 
      * @param taskId 任务ID
      * @param businessId 业务ID
      * @param userId 用户ID
-     * @param imageFiles 页码到图片路径的映射
+     * @param minioObjectKeys 页码到MinIO对象键的映射
      * @param isBase 是否为基础转换
      */
     @Transactional
     protected void savePageImages(String taskId, String businessId, String userId, 
-                                   Map<Integer, String> imageFiles, boolean isBase) {
-        for (Map.Entry<Integer, String> entry : imageFiles.entrySet()) {
+                                   Map<Integer, String> minioObjectKeys, boolean isBase) {
+        for (Map.Entry<Integer, String> entry : minioObjectKeys.entrySet()) {
             int pageNumber = entry.getKey();
-            String imagePath = entry.getValue();
-            
-            File imageFile = new File(imagePath);
+            String objectKey = entry.getValue();
             
             PdfPageImage pageImage = PdfPageImage.builder()
                 .taskId(taskId)
                 .businessId(businessId)
                 .userId(userId)
                 .pageNumber(pageNumber)
-                .imageObjectKey(imagePath)
+                .imageObjectKey(objectKey)
                 .isBase(isBase)
-                .fileSize(imageFile.length())
                 .build();
             
-            try {
-                BufferedImage image = ImageIO.read(imageFile);
-                if (image != null) {
-                    pageImage.setWidth(image.getWidth());
-                    pageImage.setHeight(image.getHeight());
-                }
-            } catch (IOException e) {
-                log.warn("Failed to read image dimensions for: {}", imageFile.getName(), e);
-            }
-            
             pageImageRepository.save(pageImage);
+            
+            log.debug("Saved page image metadata: taskId={}, page={}, objectKey={}", 
+                taskId, pageNumber, objectKey);
         }
     }
     
@@ -387,6 +417,15 @@ public class PdfUploadService {
             }
         }
         
+        String pdfUrl = null;
+        if (task.getPdfObjectKey() != null && !task.getPdfObjectKey().isEmpty()) {
+            try {
+                pdfUrl = minioStorageService.getPresignedUrl(task.getPdfObjectKey(), 60);
+            } catch (Exception e) {
+                log.warn("Failed to generate presigned URL for PDF: {}", task.getPdfObjectKey(), e);
+            }
+        }
+        
         return PdfConversionTaskResponse.builder()
             .taskId(task.getTaskId())
             .businessId(task.getBusinessId())
@@ -394,6 +433,8 @@ public class PdfUploadService {
             .filename(task.getFilename())
             .totalPages(task.getTotalPages())
             .convertedPages(convertedPages)
+            .pdfObjectKey(task.getPdfObjectKey())
+            .pdfUrl(pdfUrl)
             .status(task.getStatus())
             .isBase(task.getIsBase())
             .errorMessage(task.getErrorMessage())
@@ -496,15 +537,19 @@ public class PdfUploadService {
         int endIndex = Math.min(startIndex + effectivePageSize, totalPages);
         
         List<PdfPageImageInfo> pageImages = allImages.subList(startIndex, endIndex).stream()
-            .map(img -> PdfPageImageInfo.builder()
-                .pageNumber(img.getPageNumber())
-                .imageObjectKey(img.getImageObjectKey())
-                .isBase(img.getIsBase())
-                .userId(img.getUserId())
-                .width(img.getWidth())
-                .height(img.getHeight())
-                .fileSize(img.getFileSize())
-                .build())
+            .map(img -> {
+                String presignedUrl = minioStorageService.getPresignedUrl(img.getImageObjectKey(), 60);
+                return PdfPageImageInfo.builder()
+                    .pageNumber(img.getPageNumber())
+                    .imageObjectKey(img.getImageObjectKey())
+                    .imageUrl(presignedUrl)
+                    .isBase(img.getIsBase())
+                    .userId(img.getUserId())
+                    .width(img.getWidth())
+                    .height(img.getHeight())
+                    .fileSize(img.getFileSize())
+                    .build();
+            })
             .collect(Collectors.toList());
         
         return PdfImageResponse.builder()
@@ -536,6 +581,15 @@ public class PdfUploadService {
             }
         }
         
+        String pdfUrl = null;
+        if (task.getPdfObjectKey() != null && !task.getPdfObjectKey().isEmpty()) {
+            try {
+                pdfUrl = minioStorageService.getPresignedUrl(task.getPdfObjectKey(), 60);
+            } catch (Exception e) {
+                log.warn("Failed to generate presigned URL for PDF: {}", task.getPdfObjectKey(), e);
+            }
+        }
+        
         return PdfConversionTaskResponse.builder()
             .taskId(task.getTaskId())
             .businessId(task.getBusinessId())
@@ -543,6 +597,8 @@ public class PdfUploadService {
             .filename(task.getFilename())
             .totalPages(task.getTotalPages())
             .convertedPages(convertedPages)
+            .pdfObjectKey(task.getPdfObjectKey())
+            .pdfUrl(pdfUrl)
             .status(task.getStatus())
             .isBase(task.getIsBase())
             .errorMessage(task.getErrorMessage())
