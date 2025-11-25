@@ -1,5 +1,6 @@
 package com.example.minioupload;
 
+import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableAsync;
@@ -21,9 +22,11 @@ import org.springframework.scheduling.annotation.EnableAsync;
  * - MySQL 8.0用于持久化存储
  * - AWS SDK v2用于S3兼容操作
  * - HikariCP用于优化的数据库连接池
+ * - MyBatis-Plus用于ORM框架
  */
 @SpringBootApplication
 @EnableAsync
+@MapperScan("com.example.minioupload.repository")
 public class MinioUploadApplication {
 
     /**

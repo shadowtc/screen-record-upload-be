@@ -1,22 +1,27 @@
 package com.example.minioupload.repository;
 
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.example.minioupload.model.PdfConversionTask;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
-import java.util.Optional;
 
-@Repository
-public interface PdfConversionTaskRepository extends JpaRepository<PdfConversionTask, Long> {
+@Mapper
+public interface PdfConversionTaskRepository extends BaseMapper<PdfConversionTask> {
     
-    Optional<PdfConversionTask> findByTaskId(String taskId);
+    @Select("SELECT * FROM pdf_conversion_task WHERE task_id = #{taskId}")
+    PdfConversionTask findByTaskId(String taskId);
     
+    @Select("SELECT * FROM pdf_conversion_task WHERE business_id = #{businessId}")
     List<PdfConversionTask> findByBusinessId(String businessId);
     
+    @Select("SELECT * FROM pdf_conversion_task WHERE business_id = #{businessId} AND user_id = #{userId}")
     List<PdfConversionTask> findByBusinessIdAndUserId(String businessId, String userId);
     
-    Optional<PdfConversionTask> findByBusinessIdAndIsBaseTrue(String businessId);
+    @Select("SELECT * FROM pdf_conversion_task WHERE business_id = #{businessId} AND is_base = 1 LIMIT 1")
+    PdfConversionTask findByBusinessIdAndIsBaseTrue(String businessId);
     
+    @Select("SELECT * FROM pdf_conversion_task WHERE business_id = #{businessId} ORDER BY created_at DESC")
     List<PdfConversionTask> findByBusinessIdOrderByCreatedAtDesc(String businessId);
 }

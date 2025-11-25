@@ -11,8 +11,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -144,8 +142,8 @@ public class PdfUploadService {
         boolean isIncrementalConversion = request.getPages() != null && !request.getPages().isEmpty();
         
         if (isIncrementalConversion) {
-            Optional<PdfConversionTask> baseTask = taskRepository.findByBusinessIdAndIsBaseTrue(request.getBusinessId());
-            if (baseTask.isEmpty()) {
+            PdfConversionTask baseTask = taskRepository.findByBusinessIdAndIsBaseTrue(request.getBusinessId());
+            if (baseTask == null) {
                 return PdfUploadResponse.builder()
                     .status("ERROR")
                     .message("Base conversion not found. Please perform full conversion first (without pages parameter)")
@@ -177,7 +175,7 @@ public class PdfUploadService {
             }
         }
         
-        taskRepository.save(task);
+        taskRepository.insert(task);
         
         Path taskDir = null;
         File tempPdfFile = null;
@@ -239,14 +237,17 @@ public class PdfUploadService {
             minioStorageService.uploadFile(pdfFile, pdfObjectKey);
             log.info("PDF uploaded to MinIO: {}", pdfObjectKey);
             
-            PdfConversionTask task = taskRepository.findByTaskId(taskId).orElseThrow();
+            PdfConversionTask task = taskRepository.findByTaskId(taskId);
+            if (task == null) {
+                throw new RuntimeException("Task not found: " + taskId);
+            }
             task.setPdfObjectKey(pdfObjectKey);
-            taskRepository.save(task);
+            taskRepository.updateById(task);
             
             int pageCount = pdfToImageService.getPageCount(pdfFile);
             
             task.setTotalPages(pageCount);
-            taskRepository.save(task);
+            taskRepository.updateById(task);
             
             int dpi = request.getImageDpi() != null ? request.getImageDpi() : 
                 properties.getImageRendering().getDpi();
@@ -345,7 +346,7 @@ public class PdfUploadService {
                 .isBase(isBase)
                 .build();
             
-            pageImageRepository.save(pageImage);
+            pageImageRepository.insert(pageImage);
             
             log.debug("Saved page image metadata: taskId={}, page={}, objectKey={}", 
                 taskId, pageNumber, objectKey);
@@ -361,14 +362,13 @@ public class PdfUploadService {
      */
     @Transactional
     protected void updateTaskStatus(String taskId, String status, String errorMessage) {
-        Optional<PdfConversionTask> taskOpt = taskRepository.findByTaskId(taskId);
-        if (taskOpt.isPresent()) {
-            PdfConversionTask task = taskOpt.get();
+        PdfConversionTask task = taskRepository.findByTaskId(taskId);
+        if (task != null) {
             task.setStatus(status);
             if (errorMessage != null) {
                 task.setErrorMessage(errorMessage);
             }
-            taskRepository.save(task);
+            taskRepository.updateById(task);
         }
     }
     
@@ -379,16 +379,14 @@ public class PdfUploadService {
      * @return 进度信息
      */
     public PdfConversionProgress getProgress(String taskId) {
-        Optional<PdfConversionTask> taskOpt = taskRepository.findByTaskId(taskId);
-        if (taskOpt.isEmpty()) {
+        PdfConversionTask task = taskRepository.findByTaskId(taskId);
+        if (task == null) {
             return PdfConversionProgress.builder()
                 .jobId(taskId)
                 .status("NOT_FOUND")
                 .message("Task not found")
                 .build();
         }
-        
-        PdfConversionTask task = taskOpt.get();
         
         int progressPercentage = 0;
         if ("COMPLETED".equals(task.getStatus())) {
@@ -407,19 +405,17 @@ public class PdfUploadService {
             .build();
             }
 
-            /**
-            * 获取任务详情
-            *
-            * @param taskId 任务ID
-            * @return 任务响应信息，未找到时返回null
-            */
-            public PdfConversionTaskResponse getTask(String taskId) {
-        Optional<PdfConversionTask> taskOpt = taskRepository.findByTaskId(taskId);
-        if (taskOpt.isEmpty()) {
+    /**
+     * 获取任务详情
+     *
+     * @param taskId 任务ID
+     * @return 任务响应信息，未找到时返回null
+     */
+    public PdfConversionTaskResponse getTask(String taskId) {
+        PdfConversionTask task = taskRepository.findByTaskId(taskId);
+        if (task == null) {
             return null;
         }
-        
-        PdfConversionTask task = taskOpt.get();
         List<Integer> convertedPages = null;
         
         if (task.getConvertedPages() != null) {
