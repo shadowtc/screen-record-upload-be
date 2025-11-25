@@ -179,9 +179,30 @@ public class PdfUploadService {
         
         taskRepository.save(task);
         
+        Path taskDir = null;
+        File tempPdfFile = null;
+        try {
+            taskDir = Paths.get(properties.getTempDirectory(), taskId);
+            Files.createDirectories(taskDir);
+            
+            tempPdfFile = taskDir.resolve(originalFilename).toFile();
+            file.transferTo(tempPdfFile);
+            log.debug("Saved MultipartFile to temp file: {}", tempPdfFile.getAbsolutePath());
+        } catch (IOException e) {
+            log.error("Failed to save uploaded file to temp directory", e);
+            updateTaskStatus(taskId, "FAILED", "Failed to save uploaded file: " + e.getMessage());
+            return PdfUploadResponse.builder()
+                .taskId(taskId)
+                .status("ERROR")
+                .message("Failed to save uploaded file: " + e.getMessage())
+                .build();
+        }
+        
         final PdfConversionTaskRequest finalRequest = request;
+        final File finalTempPdfFile = tempPdfFile;
+        final Path finalTaskDir = taskDir;
         CompletableFuture.runAsync(() -> 
-            executePdfToImageConversion(file, finalRequest, taskId), videoCompressionExecutor);
+            executePdfToImageConversion(finalTempPdfFile, finalTaskDir, finalRequest, taskId), videoCompressionExecutor);
         
         return PdfUploadResponse.builder()
             .taskId(taskId)
@@ -194,35 +215,27 @@ public class PdfUploadService {
             * 执行PDF转图片转换（异步执行）
             *
             * 转换流程：
-            * 1. 保存上传的PDF文件到临时目录
-            * 2. 上传PDF到MinIO
-            * 3. 获取PDF总页数
-            * 4. 确定需要转换的页面（全量或增量）
-            * 5. 调用PdfToImageService进行页面渲染并上传到MinIO
-            * 6. 保存图片元数据到数据库
-            * 7. 更新任务状态
-            * 8. 清理临时文件
+            * 1. 上传PDF到MinIO
+            * 2. 获取PDF总页数
+            * 3. 确定需要转换的页面（全量或增量）
+            * 4. 调用PdfToImageService进行页面渲染并上传到MinIO
+            * 5. 保存图片元数据到数据库
+            * 6. 更新任务状态
+            * 7. 清理临时文件
             *
-            * @param file PDF文件
+            * @param pdfFile PDF临时文件（已保存到磁盘）
+            * @param taskDir 任务临时目录
             * @param request 转换请求
             * @param taskId 任务ID
             */
-            private void executePdfToImageConversion(MultipartFile file, PdfConversionTaskRequest request, String taskId) {
+            private void executePdfToImageConversion(File pdfFile, Path taskDir, PdfConversionTaskRequest request, String taskId) {
         long startTime = System.currentTimeMillis();
-        File pdfFile = null;
-        Path taskDir = null;
         
         try {
             updateTaskStatus(taskId, "PROCESSING", null);
             
-            taskDir = Paths.get(properties.getTempDirectory(), taskId);
-            Files.createDirectories(taskDir);
-            
-            pdfFile = taskDir.resolve(file.getOriginalFilename()).toFile();
-            file.transferTo(pdfFile);
-            
             String pdfObjectKey = String.format("pdf/%s/%s/%s/%s", 
-                request.getUserId(), request.getBusinessId(), taskId, file.getOriginalFilename());
+                request.getUserId(), request.getBusinessId(), taskId, pdfFile.getName());
             minioStorageService.uploadFile(pdfFile, pdfObjectKey);
             log.info("PDF uploaded to MinIO: {}", pdfObjectKey);
             
