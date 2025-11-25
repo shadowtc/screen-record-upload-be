@@ -83,14 +83,14 @@ s3:
   # MinIO服务端点
   # 支持任何S3兼容的存储服务（AWS S3, 阿里云OSS等）
   # 格式：http://host:port 或 https://host:port
-  endpoint: ${S3_ENDPOINT:http://192.168.0.245:9000}
+  endpoint: ${S3_ENDPOINT:http://192.168.0.245:9010}
   # S3访问密钥（Access Key ID）
-  access-key: ${S3_ACCESS_KEY:minioadmin}
+  access-key: ${S3_ACCESS_KEY:admin}
   # S3密钥（Secret Access Key）
-  secret-key: ${S3_SECRET_KEY:minioadmin123}
+  secret-key: ${S3_SECRET_KEY:admin123}
   # 默认存储桶名称
   # 如果此值为空，需要在上传请求中指定存储桶
-  bucket: ${S3_BUCKET:remote-consent}
+  bucket: ${S3_BUCKET:econsnet-dev}
   # 存储区域/数据中心区域代码
   # AWS示例：us-east-1, us-west-2, eu-west-1
   # MinIO通常使用：us-east-1
