@@ -1,6 +1,6 @@
 package com.example.minioupload.model;
 
-import jakarta.persistence.*;
+import com.baomidou.mybatisplus.annotation.*;
 import lombok.*;
 
 import java.time.LocalDateTime;
@@ -15,58 +15,51 @@ import java.time.LocalDateTime;
  * - idx_business_id: 业务ID索引，用于按业务查询所有页面
  * - idx_is_base: 基础标识索引，用于区分全量和增量转换的图片
  */
-@Entity
-@Table(name = "pdf_page_image", indexes = {
-    @Index(name = "idx_task_id", columnList = "task_id"),
-    @Index(name = "idx_business_id", columnList = "business_id"),
-    @Index(name = "idx_is_base", columnList = "is_base")
-})
-@Getter
-@Setter
+@Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+@TableName("pdf_page_image")
 public class PdfPageImage {
 
     /**
      * 主键ID，自增
      */
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId(value = "id", type = IdType.AUTO)
     private Long id;
 
     /**
      * 关联的转换任务ID
      * 对应PdfConversionTask表的taskId
      */
-    @Column(name = "task_id", nullable = false, length = 36)
+    @TableField("task_id")
     private String taskId;
 
     /**
      * 业务ID
      * 用于业务级别的图片查询和合并
      */
-    @Column(name = "business_id", nullable = false, length = 100)
+    @TableField("business_id")
     private String businessId;
 
     /**
      * 用户ID
      */
-    @Column(name = "user_id", nullable = false, length = 100)
+    @TableField("user_id")
     private String userId;
 
     /**
      * 页码（从1开始）
      * 表示该图片对应PDF的第几页
      */
-    @Column(name = "page_number", nullable = false)
+    @TableField("page_number")
     private Integer pageNumber;
 
     /**
      * 图片对象存储键
      * 可以是本地文件路径或MinIO/S3的对象键
      */
-    @Column(name = "image_object_key", nullable = false, length = 1000)
+    @TableField("image_object_key")
     private String imageObjectKey;
 
     /**
@@ -74,40 +67,31 @@ public class PdfPageImage {
      * true: 来自全量转换
      * false: 来自增量转换（后续更新）
      */
-    @Column(name = "is_base", nullable = false)
+    @TableField("is_base")
     private Boolean isBase;
 
     /**
      * 图片宽度（像素）
      */
-    @Column
+    @TableField("width")
     private Integer width;
 
     /**
      * 图片高度（像素）
      */
-    @Column
+    @TableField("height")
     private Integer height;
 
     /**
      * 图片文件大小（字节）
      */
-    @Column(name = "file_size")
+    @TableField("file_size")
     private Long fileSize;
 
     /**
      * 图片创建时间
      * 自动设置，不可更新
      */
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @TableField(value = "created_at", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
-
-    /**
-     * 实体创建前的回调
-     * 自动设置创建时间
-     */
-    @PrePersist
-    protected void onCreate() {
-        createdAt = LocalDateTime.now();
-    }
 }
