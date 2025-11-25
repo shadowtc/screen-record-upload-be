@@ -1,6 +1,7 @@
 package com.example.minioupload.service;
 
 import com.example.minioupload.config.PdfConversionProperties;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -28,22 +29,22 @@ import java.util.Map;
  * 1. 全量转换：将PDF所有页面转换为图片
  * 2. 指定页面转换：只转换指定的页码
  * 3. 获取PDF页数
+ * 4. 上传图片到MinIO
  * 
  * 技术实现：
  * - 使用PDFBox的PDFRenderer进行页面渲染
  * - 支持自定义DPI（分辨率）
  * - 支持多种图片格式（PNG、JPG等）
  * - RGB色彩模式
+ * - 自动上传图片到MinIO存储
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class PdfToImageService {
     
     private final PdfConversionProperties properties;
-    
-    public PdfToImageService(PdfConversionProperties properties) {
-        this.properties = properties;
-    }
+    private final MinioStorageService minioStorageService;
     
     /**
      * 转换PDF为图片（使用默认配置）
@@ -181,6 +182,89 @@ public class PdfToImageService {
         }
         
         return imageFiles;
+    }
+    
+    /**
+     * 转换PDF的指定页面为图片并上传到MinIO
+     * 将页面转换为图片后立即上传到MinIO，减少本地磁盘占用
+     * 
+     * @param pdfFile PDF文件
+     * @param userId 用户ID
+     * @param businessId 业务ID
+     * @param jobId 任务ID
+     * @param pageNumbers 需要转换的页码列表（从1开始）
+     * @param dpi 图片分辨率
+     * @param format 图片格式
+     * @return 页码到MinIO对象键的映射
+     * @throws IOException 转换或上传失败时抛出
+     */
+    public Map<Integer, String> convertPagesToImagesAndUpload(File pdfFile, String userId, String businessId, 
+                                                                String jobId, List<Integer> pageNumbers, 
+                                                                int dpi, String format) throws IOException {
+        log.info("Starting PDF to images conversion and upload for jobId: {}, Pages: {}, DPI: {}, Format: {}", 
+            jobId, pageNumbers, dpi, format);
+        
+        Map<Integer, String> minioObjectKeys = new HashMap<>();
+        long startTime = System.currentTimeMillis();
+        
+        Path imageDir = Paths.get(properties.getTempDirectory(), jobId, "images");
+        Files.createDirectories(imageDir);
+        
+        try (PDDocument document = Loader.loadPDF(pdfFile)) {
+            PDFRenderer pdfRenderer = new PDFRenderer(document);
+            int pageCount = document.getNumberOfPages();
+            
+            log.info("PDF has {} pages, converting and uploading {} specific pages...", pageCount, pageNumbers.size());
+            
+            for (Integer pageNumber : pageNumbers) {
+                if (pageNumber < 1 || pageNumber > pageCount) {
+                    log.warn("Invalid page number: {}, skipping", pageNumber);
+                    continue;
+                }
+                
+                int pageIndex = pageNumber - 1;
+                long pageStartTime = System.currentTimeMillis();
+                
+                BufferedImage image = pdfRenderer.renderImageWithDPI(
+                    pageIndex, 
+                    dpi, 
+                    ImageType.RGB
+                );
+                
+                String imageFileName = String.format("page_%04d.%s", pageNumber, format.toLowerCase());
+                File imageFile = imageDir.resolve(imageFileName).toFile();
+                
+                ImageIO.write(image, format, imageFile);
+                
+                String minioObjectKey = String.format("pdf-images/%s/%s/%s/%s", 
+                    userId, businessId, jobId, imageFileName);
+                
+                minioStorageService.uploadFile(imageFile, minioObjectKey);
+                minioObjectKeys.put(pageNumber, minioObjectKey);
+                
+                Files.deleteIfExists(imageFile.toPath());
+                
+                long pageTime = System.currentTimeMillis() - pageStartTime;
+                log.debug("Page {} rendered and uploaded in {}ms, size: {} bytes, key: {}", 
+                    pageNumber, pageTime, imageFile.length(), minioObjectKey);
+            }
+            
+            long totalTime = System.currentTimeMillis() - startTime;
+            log.info("Successfully converted and uploaded {} pages to MinIO in {}ms", 
+                minioObjectKeys.size(), totalTime);
+            
+        } catch (IOException e) {
+            log.error("Failed to convert PDF pages to images and upload for jobId: {}", jobId, e);
+            throw new IOException("PDF to images conversion and upload failed: " + e.getMessage(), e);
+        } finally {
+            try {
+                Files.deleteIfExists(imageDir);
+            } catch (IOException e) {
+                log.warn("Failed to delete temp image directory: {}", imageDir, e);
+            }
+        }
+        
+        return minioObjectKeys;
     }
     
     /**
