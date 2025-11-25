@@ -1,6 +1,6 @@
 package com.example.minioupload.model;
 
-import jakarta.persistence.*;
+import com.baomidou.mybatisplus.annotation.*;
 import lombok.*;
 
 import java.time.LocalDateTime;
@@ -17,79 +17,70 @@ import java.time.LocalDateTime;
  * - idx_status: 状态索引，用于查询特定状态的任务
  * - idx_created_at: 创建时间索引，用于时间范围查询
  */
-@Entity
-@Table(name = "pdf_conversion_task", indexes = {
-    @Index(name = "idx_task_id", columnList = "task_id", unique = true),
-    @Index(name = "idx_business_id", columnList = "business_id"),
-    @Index(name = "idx_user_id", columnList = "user_id"),
-    @Index(name = "idx_status", columnList = "status"),
-    @Index(name = "idx_created_at", columnList = "created_at")
-})
-@Getter
-@Setter
+@Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+@TableName("pdf_conversion_task")
 public class PdfConversionTask {
 
     /**
      * 主键ID，自增
      */
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId(value = "id", type = IdType.AUTO)
     private Long id;
 
     /**
      * 任务唯一标识符（UUID）
      * 用于对外暴露的任务ID
      */
-    @Column(name = "task_id", nullable = false, unique = true, length = 36)
+    @TableField("task_id")
     private String taskId;
 
     /**
      * 业务ID
      * 用于关联业务场景，支持相同业务的增量转换
      */
-    @Column(name = "business_id", nullable = false, length = 100)
+    @TableField("business_id")
     private String businessId;
 
     /**
      * 用户ID
      */
-    @Column(name = "user_id", nullable = false, length = 100)
+    @TableField("user_id")
     private String userId;
 
     /**
      * 原始PDF文件名
      */
-    @Column(nullable = false, length = 500)
+    @TableField("filename")
     private String filename;
 
     /**
      * PDF文档总页数
      */
-    @Column(name = "total_pages", nullable = false)
+    @TableField("total_pages")
     private Integer totalPages;
 
     /**
      * 已转换的页码列表（JSON格式）
      * 用于增量转换时记录转换的页码
      */
-    @Column(name = "converted_pages", columnDefinition = "TEXT")
+    @TableField("converted_pages")
     private String convertedPages;
 
     /**
      * PDF文件在对象存储中的键
      * 可用于存储MinIO或S3的对象键
      */
-    @Column(name = "pdf_object_key", length = 1000)
+    @TableField("pdf_object_key")
     private String pdfObjectKey;
 
     /**
      * 任务状态
      * 可能的值：SUBMITTED(已提交)、PROCESSING(处理中)、COMPLETED(已完成)、FAILED(失败)
      */
-    @Column(nullable = false, length = 20)
+    @TableField("status")
     private String status;
 
     /**
@@ -97,46 +88,27 @@ public class PdfConversionTask {
      * true: 全量转换，转换所有页面
      * false: 增量转换，只转换指定页面
      */
-    @Column(name = "is_base", nullable = false)
+    @TableField("is_base")
     private Boolean isBase;
 
     /**
      * 错误信息
      * 任务失败时记录错误详情
      */
-    @Column(name = "error_message", columnDefinition = "TEXT")
+    @TableField("error_message")
     private String errorMessage;
 
     /**
      * 任务创建时间
      * 自动设置，不可更新
      */
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @TableField(value = "created_at", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 
     /**
      * 任务最后更新时间
      * 每次更新时自动刷新
      */
-    @Column(name = "updated_at", nullable = false)
+    @TableField(value = "updated_at", fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
-
-    /**
-     * 实体创建前的回调
-     * 自动设置创建时间和更新时间
-     */
-    @PrePersist
-    protected void onCreate() {
-        createdAt = LocalDateTime.now();
-        updatedAt = LocalDateTime.now();
-    }
-
-    /**
-     * 实体更新前的回调
-     * 自动更新最后更新时间
-     */
-    @PreUpdate
-    protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
-    }
 }

@@ -43,38 +43,33 @@ spring:
       # 连接最大生命周期（毫秒）
       # 30分钟，即使连接未被使用也会被关闭并重建
       max-lifetime: 1800000
-  
-  # JPA/Hibernate ORM配置
-  jpa:
-    hibernate:
-      # DDL自动更新策略
-      # update：首次启动时自动创建表，后续只更新表结构（不删除字段）
-      # 其他值：create（每次删除重建），create-drop（运行时创建，关闭时删除），validate（仅验证）
-      ddl-auto: update
+
+# ============================================================
+# MyBatis-Plus配置
+# ============================================================
+mybatis-plus:
+  # Mapper XML文件位置
+  mapper-locations: classpath*:/mapper/**/*.xml
+  # 实体类包路径
+  type-aliases-package: com.example.minioupload.model
+  configuration:
     # 是否在日志中打印SQL语句
     # 开发环境设为true便于调试，生产环境设为false提高性能
-    show-sql: true
-    
-    properties:
-      hibernate:
-        # Hibernate方言，针对具体数据库的SQL方言
-        # MySQL8Dialect：针对MySQL 8.0+的优化
-        dialect: org.hibernate.dialect.MySQL8Dialect
-        # 是否格式化SQL输出（让日志SQL更易读）
-        format_sql: true
-        # 是否生成SQL注释（便于日志中理解SQL用途）
-        use_sql_comments: true
-        
-        jdbc:
-          # JDBC批处理大小
-          # 设置为20表示20条INSERT/UPDATE/DELETE语句批量执行
-          # 提高性能但增加内存消耗
-          batch_size: 20
-        
-        # 是否为INSERT操作排序（降低数据库锁等待）
-        order_inserts: true
-        # 是否为UPDATE操作排序
-        order_updates: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # 下划线转驼峰命名
+    map-underscore-to-camel-case: true
+    # 缓存配置
+    cache-enabled: false
+    # 延迟加载配置
+    lazy-loading-enabled: false
+  global-config:
+    db-config:
+      # 主键类型：AUTO为数据库自增
+      id-type: auto
+      # 逻辑删除配置（如果需要）
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
 
 # ============================================================
 # MinIO S3存储配置
