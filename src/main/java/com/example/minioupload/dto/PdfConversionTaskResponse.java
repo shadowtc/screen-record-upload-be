@@ -49,6 +49,16 @@ public class PdfConversionTaskResponse {
     private List<Integer> convertedPages;
     
     /**
+     * PDF文件在MinIO中的对象键
+     */
+    private String pdfObjectKey;
+    
+    /**
+     * PDF文件预签名URL（用于下载）
+     */
+    private String pdfUrl;
+    
+    /**
      * 任务状态：SUBMITTED(已提交)、PROCESSING(处理中)、COMPLETED(已完成)、FAILED(失败)
      */
     private String status;
