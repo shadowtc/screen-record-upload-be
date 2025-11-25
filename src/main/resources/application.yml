@@ -22,7 +22,7 @@ spring:
     # 数据库用户名
     username: ${DB_USERNAME:root}
     # 数据库密码
-    password: ${DB_PASSWORD:123456}
+    password: ${DB_PASSWORD:Cs520@gcp.com}
     
     # HikariCP连接池配置
     # HikariCP是当前最快的JDBC连接池实现
@@ -143,7 +143,7 @@ server:
   # 监听端口号
   # REST API通过此端口访问
   # Docker环境中通过端口映射暴露
-  port: 8080
+  port: 9220
   
   # 异步请求超时配置（毫秒）
   # 用于处理长时间运行的异步操作
@@ -375,7 +375,7 @@ pdf:
     
     # 临时目录路径
     # 存储转换中和已完成的PDF文件及图片
-    # Linux/Docker：/tmp/pdf-conversion
+    # Linux/Docker：/home/admin/eConsent/upload
     # Windows：D://ruoyi/pdf-conversion
     temp-directory: ${PDF_TEMP_DIR:D://ruoyi/pdf-conversion}
     
