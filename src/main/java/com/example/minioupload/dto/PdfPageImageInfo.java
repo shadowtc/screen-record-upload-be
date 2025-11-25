@@ -9,10 +9,19 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class PageImageInfo {
+public class PdfPageImageInfo {
+    
     private Integer pageNumber;
-    private String imagePath;
-    private Long fileSize;
+    
+    private String imageObjectKey;
+    
+    private Boolean isBase;
+    
+    private String userId;
+    
     private Integer width;
+    
     private Integer height;
+    
+    private Long fileSize;
 }
