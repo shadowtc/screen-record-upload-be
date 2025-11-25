@@ -16,7 +16,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -75,6 +77,60 @@ public class PdfToImageService {
             
         } catch (IOException e) {
             log.error("Failed to convert PDF to images for jobId: {}", jobId, e);
+            throw new IOException("PDF to images conversion failed: " + e.getMessage(), e);
+        }
+        
+        return imageFiles;
+    }
+    
+    public Map<Integer, String> convertSpecificPagesToImages(File pdfFile, String jobId, List<Integer> pageNumbers, int dpi, String format) throws IOException {
+        log.info("Starting PDF to images conversion for jobId: {}, Pages: {}, DPI: {}, Format: {}", 
+            jobId, pageNumbers, dpi, format);
+        
+        Map<Integer, String> imageFiles = new HashMap<>();
+        long startTime = System.currentTimeMillis();
+        
+        Path imageDir = Paths.get(properties.getTempDirectory(), jobId, "images");
+        Files.createDirectories(imageDir);
+        
+        try (PDDocument document = Loader.loadPDF(pdfFile)) {
+            PDFRenderer pdfRenderer = new PDFRenderer(document);
+            int pageCount = document.getNumberOfPages();
+            
+            log.info("PDF has {} pages, converting {} specific pages...", pageCount, pageNumbers.size());
+            
+            for (Integer pageNumber : pageNumbers) {
+                if (pageNumber < 1 || pageNumber > pageCount) {
+                    log.warn("Invalid page number: {}, skipping", pageNumber);
+                    continue;
+                }
+                
+                int pageIndex = pageNumber - 1;
+                long pageStartTime = System.currentTimeMillis();
+                
+                BufferedImage image = pdfRenderer.renderImageWithDPI(
+                    pageIndex, 
+                    dpi, 
+                    ImageType.RGB
+                );
+                
+                String imageFileName = String.format("page_%04d.%s", pageNumber, format.toLowerCase());
+                File imageFile = imageDir.resolve(imageFileName).toFile();
+                
+                ImageIO.write(image, format, imageFile);
+                imageFiles.put(pageNumber, imageFile.getAbsolutePath());
+                
+                long pageTime = System.currentTimeMillis() - pageStartTime;
+                log.debug("Page {} rendered in {}ms, size: {} bytes", 
+                    pageNumber, pageTime, imageFile.length());
+            }
+            
+            long totalTime = System.currentTimeMillis() - startTime;
+            log.info("Successfully converted {} pages to images in {}ms", 
+                imageFiles.size(), totalTime);
+            
+        } catch (IOException e) {
+            log.error("Failed to convert PDF pages to images for jobId: {}", jobId, e);
             throw new IOException("PDF to images conversion failed: " + e.getMessage(), e);
         }
         
