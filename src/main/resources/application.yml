@@ -9,6 +9,31 @@ spring:
     multipart:
       max-file-size: 100MB
       max-request-size: 100MB
+  
+  # Redis配置
+  redis:
+    # Redis服务器地址
+    host: ${REDIS_HOST:localhost}
+    # Redis服务器端口
+    port: ${REDIS_PORT:6379}
+    # Redis数据库索引（0-15，默认为0）
+    database: ${REDIS_DATABASE:0}
+    # Redis密码（如果没有设置密码，可以留空）
+    password: ${REDIS_PASSWORD:}
+    # 连接超时时间（毫秒）
+    timeout: 10000
+    # Lettuce连接池配置
+    lettuce:
+      pool:
+        # 连接池最大连接数
+        max-active: 8
+        # 连接池最大阻塞等待时间（毫秒）
+        max-wait: -1
+        # 连接池中的最大空闲连接
+        max-idle: 8
+        # 连接池中的最小空闲连接
+        min-idle: 0
+  
   # 数据源配置
   datasource:
     # JDBC连接字符串
