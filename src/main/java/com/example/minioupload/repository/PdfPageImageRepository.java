@@ -17,6 +17,9 @@ public interface PdfPageImageRepository extends BaseMapper<PdfPageImage> {
     @Select("SELECT * FROM pdf_page_image WHERE business_id = #{businessId} AND is_base = 1 ORDER BY page_number ASC")
     List<PdfPageImage> findByBusinessIdAndIsBaseTrueOrderByPageNumberAsc(String businessId);
     
+    @Select("SELECT * FROM pdf_page_image WHERE business_id = #{businessId} AND tenant_id = #{tenantId} AND is_base = 1 ORDER BY page_number ASC")
+    List<PdfPageImage> findByBusinessIdAndTenantIdAndIsBaseTrueOrderByPageNumberAsc(@Param("businessId") String businessId, @Param("tenantId") String tenantId);
+    
     @Select("SELECT * FROM pdf_page_image WHERE business_id = #{businessId} AND user_id = #{userId} AND is_base = 0 ORDER BY page_number ASC")
     List<PdfPageImage> findByBusinessIdAndUserIdAndIsBaseFalseOrderByPageNumberAsc(@Param("businessId") String businessId, @Param("userId") String userId);
     
@@ -24,4 +27,9 @@ public interface PdfPageImageRepository extends BaseMapper<PdfPageImage> {
             "((is_base = 1) OR (user_id = #{userId} AND is_base = 0)) " +
             "ORDER BY page_number ASC")
     List<PdfPageImage> findMergedImages(@Param("businessId") String businessId, @Param("userId") String userId);
+    
+    @Select("SELECT * FROM pdf_page_image WHERE business_id = #{businessId} AND tenant_id = #{tenantId} AND " +
+            "((is_base = 1) OR (user_id = #{userId} AND is_base = 0)) " +
+            "ORDER BY page_number ASC")
+    List<PdfPageImage> findMergedImages(@Param("businessId") String businessId, @Param("tenantId") String tenantId, @Param("userId") String userId);
 }

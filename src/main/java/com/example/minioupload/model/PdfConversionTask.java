@@ -51,6 +51,12 @@ public class PdfConversionTask {
     private String userId;
 
     /**
+     * 租户ID
+     */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /**
      * 原始PDF文件名
      */
     @TableField("filename")
