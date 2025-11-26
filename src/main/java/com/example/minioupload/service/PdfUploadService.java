@@ -126,6 +126,13 @@ public class PdfUploadService {
                 .build();
         }
         
+        if (request.getTenantId() == null || request.getTenantId().trim().isEmpty()) {
+            return PdfUploadResponse.builder()
+                .status("ERROR")
+                .message("Tenant ID is required")
+                .build();
+        }
+        
         String originalFilename = file.getOriginalFilename();
         if (originalFilename == null || !originalFilename.toLowerCase().endsWith(".pdf")) {
             return PdfUploadResponse.builder()
@@ -146,7 +153,8 @@ public class PdfUploadService {
         boolean isIncrementalConversion = request.getPages() != null && !request.getPages().isEmpty();
         
         if (isIncrementalConversion) {
-            PdfConversionTask baseTask = taskRepository.findByBusinessIdAndIsBaseTrue(request.getBusinessId());
+            PdfConversionTask baseTask = taskRepository.findByBusinessIdAndTenantIdAndIsBaseTrue(
+                request.getBusinessId(), request.getTenantId());
             if (baseTask == null) {
                 return PdfUploadResponse.builder()
                     .status("ERROR")
@@ -161,6 +169,7 @@ public class PdfUploadService {
             .taskId(taskId)
             .businessId(request.getBusinessId())
             .userId(request.getUserId())
+            .tenantId(request.getTenantId())
             .filename(originalFilename)
             .totalPages(0)
             .status("SUBMITTED")
@@ -258,10 +267,18 @@ public class PdfUploadService {
                 .build();
         }
         
+        if (request.getTenantId() == null || request.getTenantId().trim().isEmpty()) {
+            return PdfUploadResponse.builder()
+                .status("ERROR")
+                .message("Tenant ID is required")
+                .build();
+        }
+        
         boolean isIncrementalConversion = request.getPages() != null && !request.getPages().isEmpty();
         
         if (isIncrementalConversion) {
-            PdfConversionTask baseTask = taskRepository.findByBusinessIdAndIsBaseTrue(request.getBusinessId());
+            PdfConversionTask baseTask = taskRepository.findByBusinessIdAndTenantIdAndIsBaseTrue(
+                request.getBusinessId(), request.getTenantId());
             if (baseTask == null) {
                 return PdfUploadResponse.builder()
                     .status("ERROR")
@@ -352,6 +369,7 @@ public class PdfUploadService {
             .taskId(taskId)
             .businessId(request.getBusinessId())
             .userId(request.getUserId())
+            .tenantId(request.getTenantId())
             .filename(filename)
             .totalPages(0)
             .status("SUBMITTED")
@@ -376,6 +394,7 @@ public class PdfUploadService {
         PdfConversionTaskRequest conversionRequest = PdfConversionTaskRequest.builder()
             .businessId(request.getBusinessId())
             .userId(request.getUserId())
+            .tenantId(request.getTenantId())
             .pages(request.getPages())
             .imageDpi(request.getImageDpi())
             .imageFormat(request.getImageFormat())
@@ -545,7 +564,7 @@ public class PdfUploadService {
             Map<Integer, String> minioObjectKeys = pdfToImageService.convertPagesToImagesAndUpload(
                 pdfFile, request.getUserId(), request.getBusinessId(), taskId, pagesToConvert, dpi, format);
             
-            savePageImages(taskId, request.getBusinessId(), request.getUserId(), 
+            savePageImages(taskId, request.getBusinessId(), request.getUserId(), request.getTenantId(),
                 minioObjectKeys, task.getIsBase());
             
             long processingTime = System.currentTimeMillis() - startTime;
@@ -591,18 +610,19 @@ public class PdfUploadService {
      * 保存页面图片元数据到数据库
      * 
      * 为每个转换后的图片创建数据库记录，包含：
-     * - 任务ID、业务ID、用户ID
+     * - 任务ID、业务ID、用户ID、租户ID
      * - 页码、MinIO对象键
      * - 是否为基础转换标识
      * 
      * @param taskId 任务ID
      * @param businessId 业务ID
      * @param userId 用户ID
+     * @param tenantId 租户ID
      * @param minioObjectKeys 页码到MinIO对象键的映射
      * @param isBase 是否为基础转换
      */
     @Transactional
-    protected void savePageImages(String taskId, String businessId, String userId, 
+    protected void savePageImages(String taskId, String businessId, String userId, String tenantId,
                                    Map<Integer, String> minioObjectKeys, boolean isBase) {
         for (Map.Entry<Integer, String> entry : minioObjectKeys.entrySet()) {
             int pageNumber = entry.getKey();
@@ -612,6 +632,7 @@ public class PdfUploadService {
                 .taskId(taskId)
                 .businessId(businessId)
                 .userId(userId)
+                .tenantId(tenantId)
                 .pageNumber(pageNumber)
                 .imageObjectKey(objectKey)
                 .isBase(isBase)
@@ -751,16 +772,17 @@ public class PdfUploadService {
      * 
      * 查询逻辑：
      * 1. 如果提供userId，则合并全量和增量转换的图片（增量覆盖全量）
-     * 2. 如果只提供businessId，只返回基础转换的图片
+     * 2. 如果只提供businessId和tenantId，只返回基础转换的图片
      * 3. 支持分页查询，默认每页10条
      * 
      * @param businessId 业务ID（必填）
+     * @param tenantId 租户ID（必填）
      * @param userId 用户ID（可选）
      * @param startPage 起始页码（从1开始）
      * @param pageSize 每页大小
      * @return 图片响应，包含分页信息和图片列表
      */
-    public PdfImageResponse getImages(String businessId, String userId, Integer startPage, Integer pageSize) {
+    public PdfImageResponse getImages(String businessId, String tenantId, String userId, Integer startPage, Integer pageSize) {
         if (businessId == null || businessId.trim().isEmpty()) {
             return PdfImageResponse.builder()
                 .status("ERROR")
@@ -768,10 +790,17 @@ public class PdfUploadService {
                 .build();
         }
         
+        if (tenantId == null || tenantId.trim().isEmpty()) {
+            return PdfImageResponse.builder()
+                .status("ERROR")
+                .message("Tenant ID is required")
+                .build();
+        }
+        
         List<PdfPageImage> allImages;
         
         if (userId != null && !userId.trim().isEmpty()) {
-            allImages = pageImageRepository.findMergedImages(businessId, userId);
+            allImages = pageImageRepository.findMergedImages(businessId, tenantId, userId);
             
             Map<Integer, PdfPageImage> mergedMap = new HashMap<>();
             for (PdfPageImage image : allImages) {
@@ -783,7 +812,7 @@ public class PdfUploadService {
             allImages = new ArrayList<>(mergedMap.values());
             allImages.sort(Comparator.comparing(PdfPageImage::getPageNumber));
         } else {
-            allImages = pageImageRepository.findByBusinessIdAndIsBaseTrueOrderByPageNumberAsc(businessId);
+            allImages = pageImageRepository.findByBusinessIdAndTenantIdAndIsBaseTrueOrderByPageNumberAsc(businessId, tenantId);
         }
         
         if (allImages.isEmpty()) {

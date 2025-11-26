@@ -49,6 +49,12 @@ public class PdfPageImage {
     private String userId;
 
     /**
+     * 租户ID
+     */
+    @TableField("tenant_id")
+    private String tenantId;
+
+    /**
      * 页码（从1开始）
      * 表示该图片对应PDF的第几页
      */

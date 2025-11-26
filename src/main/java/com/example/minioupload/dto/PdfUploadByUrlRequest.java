@@ -33,6 +33,11 @@ public class PdfUploadByUrlRequest {
     private String userId;
     
     /**
+     * 租户ID，必填
+     */
+    private String tenantId;
+    
+    /**
      * 需要转换的页码列表（可选）
      * 如果为空或null，则执行全量转换
      * 如果指定页码，则执行增量转换（需先完成全量转换）
