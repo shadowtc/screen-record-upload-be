@@ -83,6 +83,45 @@ public class PdfConversionController {
     }
 
     /**
+     * 通过URL上传PDF文件并转换为图像
+     *
+     * @param request      包含fileUrl、businessId、userId等参数的请求对象
+     * @return             返回PDF上传和转换结果响应对象
+     */
+    @PostMapping(value = "/upload-by-url", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<PdfUploadResponse> uploadPdfByUrl(@RequestBody PdfUploadByUrlRequest request) {
+        
+        log.info("Received PDF upload by URL request - businessId: {}, userId: {}, fileUrl: {}", 
+            request.getBusinessId(), request.getUserId(), request.getFileUrl());
+
+        if (request.getFileUrl() == null || request.getFileUrl().trim().isEmpty()) {
+            return ResponseEntity.badRequest()
+                .body(PdfUploadResponse.builder()
+                    .status("ERROR")
+                    .message("File URL is required")
+                    .build());
+        }
+        
+        try {
+            PdfUploadResponse response = pdfUploadService.uploadPdfFromUrlAndConvertToImages(request);
+            
+            if ("ERROR".equals(response.getStatus())) {
+                return ResponseEntity.badRequest().body(response);
+            }
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("Failed to process PDF upload by URL request", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(PdfUploadResponse.builder()
+                    .status("ERROR")
+                    .message("Failed to process request: " + e.getMessage())
+                    .build());
+        }
+    }
+
+    /**
      * 根据任务ID获取单个转换任务详情
      *
      * @param taskId 任务ID

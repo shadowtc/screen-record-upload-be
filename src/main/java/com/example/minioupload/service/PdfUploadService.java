@@ -19,9 +19,13 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -207,7 +211,274 @@ public class PdfUploadService {
             .status("PROCESSING")
             .message("PDF upload successful. Converting to images in background.")
             .build();
+    }
+    
+    /**
+     * 通过URL上传PDF并转换为图片
+     * 
+     * 从远程URL下载PDF文件，然后执行与uploadPdfAndConvertToImages相同的处理流程：
+     * 1. 参数验证（URL、业务ID、用户ID）
+     * 2. 从URL下载文件
+     * 3. 文件格式验证（仅接受PDF）
+     * 4. 文件大小验证
+     * 5. 判断全量/增量转换模式
+     * 6. 创建任务记录
+     * 7. 启动异步转换
+     * 
+     * @param request URL上传请求参数（包含fileUrl、业务ID、用户ID、页码等）
+     * @return 上传响应（包含任务ID和状态）
+     */
+    @Transactional
+    public PdfUploadResponse uploadPdfFromUrlAndConvertToImages(PdfUploadByUrlRequest request) {
+        if (!properties.isEnabled()) {
+            return PdfUploadResponse.builder()
+                .status("ERROR")
+                .message("PDF conversion service is disabled")
+                .build();
+        }
+        
+        if (request.getFileUrl() == null || request.getFileUrl().trim().isEmpty()) {
+            return PdfUploadResponse.builder()
+                .status("ERROR")
+                .message("File URL is required")
+                .build();
+        }
+        
+        if (request.getBusinessId() == null || request.getBusinessId().trim().isEmpty()) {
+            return PdfUploadResponse.builder()
+                .status("ERROR")
+                .message("Business ID is required")
+                .build();
+        }
+        
+        if (request.getUserId() == null || request.getUserId().trim().isEmpty()) {
+            return PdfUploadResponse.builder()
+                .status("ERROR")
+                .message("User ID is required")
+                .build();
+        }
+        
+        boolean isIncrementalConversion = request.getPages() != null && !request.getPages().isEmpty();
+        
+        if (isIncrementalConversion) {
+            PdfConversionTask baseTask = taskRepository.findByBusinessIdAndIsBaseTrue(request.getBusinessId());
+            if (baseTask == null) {
+                return PdfUploadResponse.builder()
+                    .status("ERROR")
+                    .message("Base conversion not found. Please perform full conversion first (without pages parameter)")
+                    .build();
             }
+        }
+        
+        String taskId = UUID.randomUUID().toString();
+        Path taskDir = null;
+        File tempPdfFile = null;
+        String filename = null;
+        
+        try {
+            URL url = new URL(request.getFileUrl());
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(30000);
+            connection.setReadTimeout(60000);
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0");
+            
+            int responseCode = connection.getResponseCode();
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                return PdfUploadResponse.builder()
+                    .status("ERROR")
+                    .message("Failed to download file from URL. HTTP status: " + responseCode)
+                    .build();
+            }
+            
+            String contentType = connection.getContentType();
+            if (contentType != null && !contentType.toLowerCase().contains("pdf") && 
+                !contentType.toLowerCase().contains("application/octet-stream")) {
+                log.warn("Content-Type is not PDF: {}", contentType);
+            }
+            
+            long contentLength = connection.getContentLengthLong();
+            if (contentLength > properties.getMaxFileSize()) {
+                return PdfUploadResponse.builder()
+                    .status("ERROR")
+                    .message(String.format("File size exceeds limit. Max: %d MB, Actual: %.2f MB",
+                        properties.getMaxFileSize() / 1024 / 1024,
+                        contentLength / 1024.0 / 1024.0))
+                    .build();
+            }
+            
+            filename = extractFilenameFromUrl(request.getFileUrl(), connection);
+            if (!filename.toLowerCase().endsWith(".pdf")) {
+                filename = filename + ".pdf";
+            }
+            
+            taskDir = Paths.get(properties.getTempDirectory(), taskId);
+            Files.createDirectories(taskDir);
+            
+            tempPdfFile = taskDir.resolve(filename).toFile();
+            
+            try (InputStream inputStream = connection.getInputStream()) {
+                Files.copy(inputStream, tempPdfFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                log.info("Downloaded PDF from URL to temp file: {}, size: {} bytes", 
+                    tempPdfFile.getAbsolutePath(), tempPdfFile.length());
+            }
+            
+            if (tempPdfFile.length() > properties.getMaxFileSize()) {
+                return PdfUploadResponse.builder()
+                    .status("ERROR")
+                    .message(String.format("File size exceeds limit. Max: %d MB, Actual: %.2f MB",
+                        properties.getMaxFileSize() / 1024 / 1024,
+                        tempPdfFile.length() / 1024.0 / 1024.0))
+                    .build();
+            }
+            
+            if (!isPdfFile(tempPdfFile)) {
+                return PdfUploadResponse.builder()
+                    .status("ERROR")
+                    .message("Downloaded file is not a valid PDF")
+                    .build();
+            }
+            
+        } catch (IOException e) {
+            log.error("Failed to download file from URL: {}", request.getFileUrl(), e);
+            cleanupTempFiles(tempPdfFile, taskDir);
+            return PdfUploadResponse.builder()
+                .status("ERROR")
+                .message("Failed to download file from URL: " + e.getMessage())
+                .build();
+        }
+        
+        PdfConversionTask task = PdfConversionTask.builder()
+            .taskId(taskId)
+            .businessId(request.getBusinessId())
+            .userId(request.getUserId())
+            .filename(filename)
+            .totalPages(0)
+            .status("SUBMITTED")
+            .isBase(!isIncrementalConversion)
+            .build();
+        
+        if (isIncrementalConversion) {
+            try {
+                task.setConvertedPages(objectMapper.writeValueAsString(request.getPages()));
+            } catch (JsonProcessingException e) {
+                log.error("Failed to serialize pages list", e);
+                cleanupTempFiles(tempPdfFile, taskDir);
+                return PdfUploadResponse.builder()
+                    .status("ERROR")
+                    .message("Failed to process pages parameter")
+                    .build();
+            }
+        }
+        
+        taskRepository.insert(task);
+        
+        PdfConversionTaskRequest conversionRequest = PdfConversionTaskRequest.builder()
+            .businessId(request.getBusinessId())
+            .userId(request.getUserId())
+            .pages(request.getPages())
+            .imageDpi(request.getImageDpi())
+            .imageFormat(request.getImageFormat())
+            .build();
+        
+        final File finalTempPdfFile = tempPdfFile;
+        final Path finalTaskDir = taskDir;
+        CompletableFuture.runAsync(() -> 
+            executePdfToImageConversion(finalTempPdfFile, finalTaskDir, conversionRequest, taskId), 
+            videoCompressionExecutor);
+        
+        return PdfUploadResponse.builder()
+            .taskId(taskId)
+            .status("PROCESSING")
+            .message("PDF download successful. Converting to images in background.")
+            .build();
+    }
+    
+    /**
+     * 从URL或响应头中提取文件名
+     * 
+     * @param urlString URL字符串
+     * @param connection HTTP连接
+     * @return 文件名
+     */
+    private String extractFilenameFromUrl(String urlString, HttpURLConnection connection) {
+        String contentDisposition = connection.getHeaderField("Content-Disposition");
+        if (contentDisposition != null && contentDisposition.contains("filename=")) {
+            String filename = contentDisposition.substring(contentDisposition.indexOf("filename=") + 9);
+            filename = filename.replaceAll("\"", "").trim();
+            if (!filename.isEmpty()) {
+                return filename;
+            }
+        }
+        
+        String path = urlString;
+        int queryIndex = path.indexOf('?');
+        if (queryIndex > 0) {
+            path = path.substring(0, queryIndex);
+        }
+        
+        int lastSlashIndex = path.lastIndexOf('/');
+        if (lastSlashIndex >= 0 && lastSlashIndex < path.length() - 1) {
+            return path.substring(lastSlashIndex + 1);
+        }
+        
+        return "downloaded_" + System.currentTimeMillis() + ".pdf";
+    }
+    
+    /**
+     * 验证文件是否为PDF格式
+     * 
+     * @param file 文件
+     * @return 是否为PDF文件
+     */
+    private boolean isPdfFile(File file) {
+        try {
+            byte[] header = new byte[4];
+            try (InputStream is = Files.newInputStream(file.toPath())) {
+                int bytesRead = is.read(header);
+                if (bytesRead < 4) {
+                    return false;
+                }
+            }
+            return header[0] == 0x25 && header[1] == 0x50 && 
+                   header[2] == 0x44 && header[3] == 0x46;
+        } catch (IOException e) {
+            log.error("Failed to read file header", e);
+            return false;
+        }
+    }
+    
+    /**
+     * 清理临时文件和目录
+     * 
+     * @param tempFile 临时文件
+     * @param tempDir 临时目录
+     */
+    private void cleanupTempFiles(File tempFile, Path tempDir) {
+        if (tempFile != null && tempFile.exists()) {
+            try {
+                Files.deleteIfExists(tempFile.toPath());
+            } catch (IOException e) {
+                log.warn("Failed to delete temp file: {}", tempFile.getAbsolutePath(), e);
+            }
+        }
+        
+        if (tempDir != null && Files.exists(tempDir)) {
+            try {
+                Files.walk(tempDir)
+                    .sorted(Comparator.reverseOrder())
+                    .forEach(path -> {
+                        try {
+                            Files.deleteIfExists(path);
+                        } catch (IOException e) {
+                            log.warn("Failed to delete: {}", path, e);
+                        }
+                    });
+            } catch (IOException e) {
+                log.warn("Failed to clean up temp directory: {}", tempDir, e);
+            }
+        }
+    }
 
             /**
             * 执行PDF转图片转换（异步执行）
