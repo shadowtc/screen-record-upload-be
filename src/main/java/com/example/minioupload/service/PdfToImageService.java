@@ -71,6 +71,11 @@ public class PdfToImageService {
      * @throws IOException 转换失败时抛出
      */
     public List<String> convertPdfToImages(File pdfFile, String jobId, int dpi, String format) throws IOException {
+        if (format == null || format.trim().isEmpty()) {
+            format = properties.getImageRendering().getFormat();
+            log.warn("Format is null or empty, using default: {}", format);
+        }
+        
         log.info("Starting PDF to images conversion for jobId: {}, DPI: {}, Format: {}", jobId, dpi, format);
         
         List<String> imageFiles = new ArrayList<>();
@@ -131,6 +136,11 @@ public class PdfToImageService {
      * @throws IOException 转换失败时抛出
      */
     public Map<Integer, String> convertSpecificPagesToImages(File pdfFile, String jobId, List<Integer> pageNumbers, int dpi, String format) throws IOException {
+        if (format == null || format.trim().isEmpty()) {
+            format = properties.getImageRendering().getFormat();
+            log.warn("Format is null or empty, using default: {}", format);
+        }
+        
         log.info("Starting PDF to images conversion for jobId: {}, Pages: {}, DPI: {}, Format: {}", 
             jobId, pageNumbers, dpi, format);
         
@@ -201,6 +211,11 @@ public class PdfToImageService {
     public Map<Integer, String> convertPagesToImagesAndUpload(File pdfFile, String userId, String businessId, 
                                                                 String jobId, List<Integer> pageNumbers, 
                                                                 int dpi, String format) throws IOException {
+        if (format == null || format.trim().isEmpty()) {
+            format = properties.getImageRendering().getFormat();
+            log.warn("Format is null or empty, using default: {}", format);
+        }
+        
         log.info("Starting PDF to images conversion and upload for jobId: {}, Pages: {}, DPI: {}, Format: {}", 
             jobId, pageNumbers, dpi, format);
         
