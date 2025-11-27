@@ -89,6 +89,24 @@ public class PdfPageImage {
     private Integer height;
 
     /**
+     * PDF页面宽度（PDF点，1点=1/72英寸）
+     */
+    @TableField("pdf_width")
+    private Double pdfWidth;
+
+    /**
+     * PDF页面高度（PDF点，1点=1/72英寸）
+     */
+    @TableField("pdf_height")
+    private Double pdfHeight;
+
+    /**
+     * 渲染DPI（用于坐标转换）
+     */
+    @TableField("rendering_dpi")
+    private Integer renderingDpi;
+
+    /**
      * 图片文件大小（字节）
      */
     @TableField("file_size")
