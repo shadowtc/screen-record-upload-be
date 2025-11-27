@@ -541,8 +541,8 @@ public class PdfUploadService {
             
             int dpi = request.getImageDpi() != null ? request.getImageDpi() : 
                 properties.getImageRendering().getDpi();
-            String format = request.getImageFormat() != null ? request.getImageFormat() : 
-                properties.getImageRendering().getFormat();
+            String format = (request.getImageFormat() != null && !request.getImageFormat().trim().isEmpty()) 
+                ? request.getImageFormat() : properties.getImageRendering().getFormat();
             
             List<Integer> pagesToConvert = request.getPages();
             if (pagesToConvert == null || pagesToConvert.isEmpty()) {
