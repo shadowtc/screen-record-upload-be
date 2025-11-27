@@ -226,4 +226,43 @@ public class PdfConversionController {
                     .build());
         }
     }
+    
+    /**
+     * 预览PDF图片并渲染注解
+     *
+     * @param request 预览请求，包含businessId、tenantId和注解信息
+     * @return        返回所有页面图片（带注解的和原始的）
+     */
+    @PostMapping(value = "/preview-with-annotations", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<PdfAnnotationPreviewResponse> previewWithAnnotations(
+            @RequestBody PdfAnnotationPreviewRequest request) {
+        
+        log.info("Preview with annotations - businessId: {}, tenantId: {}, totalAnnotations: {}", 
+            request.getBusinessId(), request.getTenantId(), request.getTotalAnnotations());
+        
+        try {
+            PdfAnnotationPreviewResponse response = pdfUploadService.previewWithAnnotations(request);
+            
+            if ("NOT_FOUND".equals(response.getStatus())) {
+                return ResponseEntity.notFound().build();
+            }
+            
+            if ("ERROR".equals(response.getStatus())) {
+                return ResponseEntity.badRequest().body(response);
+            }
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("Failed to preview with annotations - businessId: {}, tenantId: {}", 
+                request.getBusinessId(), request.getTenantId(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(PdfAnnotationPreviewResponse.builder()
+                    .businessId(request.getBusinessId())
+                    .tenantId(request.getTenantId())
+                    .status("ERROR")
+                    .message("Failed to generate preview: " + e.getMessage())
+                    .build());
+        }
+    }
 }

@@ -194,6 +194,30 @@ public class MinioStorageService {
     }
     
     /**
+     * 下载文件为InputStream
+     * 
+     * @param objectKey 对象键
+     * @return 文件输入流
+     * @throws IOException 下载失败时抛出
+     */
+    public InputStream downloadFile(String objectKey) throws IOException {
+        log.debug("Downloading file from MinIO: {}", objectKey);
+        
+        try {
+            GetObjectRequest request = GetObjectRequest.builder()
+                .bucket(s3ConfigProperties.getBucket())
+                .key(objectKey)
+                .build();
+            
+            return s3Client.getObject(request);
+            
+        } catch (S3Exception e) {
+            log.error("Failed to download file from MinIO: {}", objectKey, e);
+            throw new IOException("MinIO download failed: " + e.getMessage(), e);
+        }
+    }
+    
+    /**
      * 获取文件的预签名下载URL
      * 
      * @param objectKey 对象键

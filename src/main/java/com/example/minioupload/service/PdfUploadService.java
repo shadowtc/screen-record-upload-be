@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.imageio.ImageIO;
+import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -63,6 +64,7 @@ public class PdfUploadService {
     private final PdfConversionTaskRepository taskRepository;
     private final PdfPageImageRepository pageImageRepository;
     private final ObjectMapper objectMapper;
+    private final ImageAnnotationService imageAnnotationService;
     
     public PdfUploadService(
             PdfConversionProperties properties,
@@ -71,7 +73,8 @@ public class PdfUploadService {
             @Qualifier("videoCompressionExecutor") Executor videoCompressionExecutor,
             PdfConversionTaskRepository taskRepository,
             PdfPageImageRepository pageImageRepository,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            ImageAnnotationService imageAnnotationService) {
         this.properties = properties;
         this.pdfToImageService = pdfToImageService;
         this.minioStorageService = minioStorageService;
@@ -79,6 +82,7 @@ public class PdfUploadService {
         this.taskRepository = taskRepository;
         this.pageImageRepository = pageImageRepository;
         this.objectMapper = objectMapper;
+        this.imageAnnotationService = imageAnnotationService;
     }
     
     /**
@@ -914,5 +918,312 @@ public class PdfUploadService {
             .createdAt(task.getCreatedAt())
             .updatedAt(task.getUpdatedAt())
             .build();
+    }
+    
+    /**
+     * 预览PDF图片并渲染注解
+     * 
+     * 核心流程：
+     * 1. 根据businessId和tenantId查找isBase=1的基类任务
+     * 2. 获取基类的所有页面图片
+     * 3. 根据pageAnnotations对指定页面进行注解渲染
+     * 4. 返回所有页面图片（被渲染的页面使用新图片，其他页面使用原图）
+     * 
+     * @param request 预览请求，包含businessId、tenantId和注解信息
+     * @return 预览响应，包含所有页面图片的访问URL
+     */
+    public PdfAnnotationPreviewResponse previewWithAnnotations(PdfAnnotationPreviewRequest request) {
+        log.info("Preview with annotations - businessId: {}, tenantId: {}, totalAnnotations: {}", 
+            request.getBusinessId(), request.getTenantId(), request.getTotalAnnotations());
+        
+        // 验证参数
+        if (request.getBusinessId() == null || request.getBusinessId().trim().isEmpty()) {
+            return PdfAnnotationPreviewResponse.builder()
+                .status("ERROR")
+                .message("Business ID is required")
+                .build();
+        }
+        
+        if (request.getTenantId() == null || request.getTenantId().trim().isEmpty()) {
+            return PdfAnnotationPreviewResponse.builder()
+                .status("ERROR")
+                .message("Tenant ID is required")
+                .build();
+        }
+        
+        // 查找基类任务
+        PdfConversionTask baseTask = taskRepository.findByBusinessIdAndTenantIdAndIsBaseTrue(
+            request.getBusinessId(), request.getTenantId());
+        
+        if (baseTask == null) {
+            log.warn("Base task not found for businessId: {}, tenantId: {}", 
+                request.getBusinessId(), request.getTenantId());
+            return PdfAnnotationPreviewResponse.builder()
+                .status("NOT_FOUND")
+                .message("Base task not found for businessId: " + request.getBusinessId())
+                .businessId(request.getBusinessId())
+                .tenantId(request.getTenantId())
+                .build();
+        }
+        
+        // 获取基类的所有页面图片
+        List<PdfPageImage> baseImages = pageImageRepository.findByBusinessIdAndTenantIdAndIsBaseTrueOrderByPageNumberAsc(
+            request.getBusinessId(), request.getTenantId());
+        
+        if (baseImages.isEmpty()) {
+            log.warn("No base images found for businessId: {}, tenantId: {}", 
+                request.getBusinessId(), request.getTenantId());
+            return PdfAnnotationPreviewResponse.builder()
+                .status("NOT_FOUND")
+                .message("No base images found")
+                .businessId(request.getBusinessId())
+                .tenantId(request.getTenantId())
+                .build();
+        }
+        
+        // 创建临时目录用于存储渲染后的图片
+        Path tempDir = null;
+        try {
+            tempDir = Files.createTempDirectory("pdf-annotation-preview-");
+            log.debug("Created temp directory: {}", tempDir);
+            
+            // 需要渲染的页面映射
+            Map<Integer, List<PdfAnnotationPreviewRequest.PageAnnotation>> pageAnnotationsMap = new HashMap<>();
+            if (request.getPageAnnotations() != null) {
+                for (Map.Entry<String, List<PdfAnnotationPreviewRequest.PageAnnotation>> entry : 
+                        request.getPageAnnotations().entrySet()) {
+                    try {
+                        int pageNumber = Integer.parseInt(entry.getKey());
+                        pageAnnotationsMap.put(pageNumber, entry.getValue());
+                    } catch (NumberFormatException e) {
+                        log.warn("Invalid page number: {}", entry.getKey());
+                    }
+                }
+            }
+            
+            List<PdfAnnotationPreviewResponse.PageImageInfo> resultImages = new ArrayList<>();
+            int renderedCount = 0;
+            
+            // 处理每一页
+            for (PdfPageImage baseImage : baseImages) {
+                int pageNumber = baseImage.getPageNumber();
+                List<PdfAnnotationPreviewRequest.PageAnnotation> annotations = pageAnnotationsMap.get(pageNumber);
+                
+                if (annotations != null && !annotations.isEmpty()) {
+                    // 需要渲染注解的页面
+                    try {
+                        PdfAnnotationPreviewResponse.PageImageInfo renderedImage = 
+                            renderPageWithAnnotations(baseImage, annotations, tempDir);
+                        resultImages.add(renderedImage);
+                        renderedCount++;
+                        log.info("Rendered page {} with {} annotations", pageNumber, annotations.size());
+                    } catch (Exception e) {
+                        log.error("Failed to render page {}: {}", pageNumber, e.getMessage(), e);
+                        // 渲染失败，使用原图
+                        resultImages.add(createPageImageInfo(baseImage, false));
+                    }
+                } else {
+                    // 不需要渲染的页面，直接使用原图
+                    resultImages.add(createPageImageInfo(baseImage, false));
+                }
+            }
+            
+            log.info("Preview completed - businessId: {}, totalPages: {}, renderedPages: {}", 
+                request.getBusinessId(), baseImages.size(), renderedCount);
+            
+            return PdfAnnotationPreviewResponse.builder()
+                .status("SUCCESS")
+                .message("Preview generated successfully")
+                .businessId(request.getBusinessId())
+                .tenantId(request.getTenantId())
+                .userId(request.getUserId())
+                .totalPages(baseImages.size())
+                .renderedPages(renderedCount)
+                .images(resultImages)
+                .build();
+                
+        } catch (Exception e) {
+            log.error("Failed to preview with annotations", e);
+            return PdfAnnotationPreviewResponse.builder()
+                .status("ERROR")
+                .message("Failed to generate preview: " + e.getMessage())
+                .businessId(request.getBusinessId())
+                .tenantId(request.getTenantId())
+                .build();
+        } finally {
+            // 清理临时目录
+            if (tempDir != null) {
+                cleanupTempDirectory(tempDir);
+            }
+        }
+    }
+    
+    /**
+     * 渲染单个页面的注解
+     */
+    private PdfAnnotationPreviewResponse.PageImageInfo renderPageWithAnnotations(
+            PdfPageImage baseImage,
+            List<PdfAnnotationPreviewRequest.PageAnnotation> annotations,
+            Path tempDir) throws IOException {
+        
+        int pageNumber = baseImage.getPageNumber();
+        String baseObjectKey = baseImage.getImageObjectKey();
+        
+        log.debug("Rendering page {} with {} annotations from {}", 
+            pageNumber, annotations.size(), baseObjectKey);
+        
+        // 下载并渲染第一个注解
+        PdfAnnotationPreviewRequest.PageAnnotation firstAnnotation = annotations.get(0);
+        double[] pdfCoords = firstAnnotation.getPdf();
+        
+        if (pdfCoords == null || pdfCoords.length < 4) {
+            throw new IOException("Invalid PDF coordinates for annotation: " + firstAnnotation.getId());
+        }
+        
+        double x = pdfCoords[0];
+        double y = pdfCoords[1];
+        double x2 = pdfCoords[2];
+        double y2 = pdfCoords[3];
+        double width = x2 - x;
+        double height = y2 - y;
+        
+        // 创建临时文件
+        String format = baseObjectKey.toLowerCase().endsWith(".png") ? "png" : "jpg";
+        File tempFile = tempDir.resolve("page_" + pageNumber + "_rendered." + format).toFile();
+        
+        // 渲染第一个注解
+        ImageAnnotationService.RenderedImageInfo renderedInfo = imageAnnotationService.renderTextOnImage(
+            baseObjectKey,
+            firstAnnotation.getContents(),
+            x, y, width, height,
+            tempFile
+        );
+        
+        // 如果有多个注解，继续在图片上渲染
+        if (annotations.size() > 1) {
+            BufferedImage image = ImageIO.read(tempFile);
+            Graphics2D g2d = image.createGraphics();
+            try {
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                
+                for (int i = 1; i < annotations.size(); i++) {
+                    PdfAnnotationPreviewRequest.PageAnnotation annotation = annotations.get(i);
+                    double[] coords = annotation.getPdf();
+                    if (coords != null && coords.length >= 4) {
+                        drawAnnotationOnImage(g2d, annotation, image.getHeight());
+                    }
+                }
+            } finally {
+                g2d.dispose();
+            }
+            ImageIO.write(image, format.toUpperCase(), tempFile);
+        }
+        
+        // 上传到MinIO
+        String objectKey = String.format("pdf-images-preview/%s/%s/page_%04d_annotated.%s",
+            baseImage.getUserId(), baseImage.getBusinessId(), pageNumber, format);
+        
+        minioStorageService.uploadFile(tempFile, objectKey);
+        
+        // 生成预签名URL
+        String presignedUrl = minioStorageService.getPresignedUrl(objectKey, 60);
+        
+        return PdfAnnotationPreviewResponse.PageImageInfo.builder()
+            .pageNumber(pageNumber)
+            .imageUrl(presignedUrl)
+            .imageObjectKey(objectKey)
+            .isRendered(true)
+            .isBase(false)
+            .width(renderedInfo.getWidth())
+            .height(renderedInfo.getHeight())
+            .build();
+    }
+    
+    /**
+     * 在已有图片上绘制注解
+     */
+    private void drawAnnotationOnImage(Graphics2D g2d, 
+            PdfAnnotationPreviewRequest.PageAnnotation annotation, 
+            int imageHeight) {
+        
+        double[] coords = annotation.getPdf();
+        double x = coords[0];
+        double y = coords[1];
+        double x2 = coords[2];
+        double y2 = coords[3];
+        double width = x2 - x;
+        double height = y2 - y;
+        
+        // 转换坐标
+        int textX = (int) x;
+        int textY = imageHeight - (int) y;
+        int textWidth = (int) width;
+        int textHeight = (int) height;
+        
+        // 绘制背景
+        g2d.setColor(new Color(255, 255, 255, 200));
+        g2d.fillRect(textX, textY - textHeight, textWidth, textHeight);
+        
+        // 绘制边框
+        g2d.setColor(Color.BLACK);
+        g2d.setStroke(new BasicStroke(2.0f));
+        g2d.drawRect(textX, textY - textHeight, textWidth, textHeight);
+        
+        // 绘制文字
+        int maxFontSize = Math.min(textWidth / (annotation.getContents().length() + 1), textHeight - 10);
+        maxFontSize = Math.max(12, Math.min(maxFontSize, 48));
+        Font font = new Font("SansSerif", Font.PLAIN, maxFontSize);
+        g2d.setFont(font);
+        g2d.setColor(Color.BLACK);
+        
+        FontMetrics fm = g2d.getFontMetrics();
+        int textDrawX = textX + (textWidth - fm.stringWidth(annotation.getContents())) / 2;
+        int textDrawY = textY - textHeight + (textHeight + fm.getAscent() - fm.getDescent()) / 2;
+        g2d.drawString(annotation.getContents(), textDrawX, textDrawY);
+    }
+    
+    /**
+     * 创建页面图片信息（原始图片）
+     */
+    private PdfAnnotationPreviewResponse.PageImageInfo createPageImageInfo(
+            PdfPageImage pageImage, boolean isRendered) {
+        
+        String presignedUrl = null;
+        try {
+            presignedUrl = minioStorageService.getPresignedUrl(pageImage.getImageObjectKey(), 60);
+        } catch (Exception e) {
+            log.warn("Failed to generate presigned URL for image: {}", pageImage.getImageObjectKey(), e);
+        }
+        
+        return PdfAnnotationPreviewResponse.PageImageInfo.builder()
+            .pageNumber(pageImage.getPageNumber())
+            .imageUrl(presignedUrl)
+            .imageObjectKey(pageImage.getImageObjectKey())
+            .isRendered(isRendered)
+            .isBase(pageImage.getIsBase())
+            .width(pageImage.getWidth())
+            .height(pageImage.getHeight())
+            .build();
+    }
+    
+    /**
+     * 清理临时目录
+     */
+    private void cleanupTempDirectory(Path tempDir) {
+        try {
+            Files.walk(tempDir)
+                .sorted(Comparator.reverseOrder())
+                .forEach(path -> {
+                    try {
+                        Files.deleteIfExists(path);
+                    } catch (IOException e) {
+                        log.warn("Failed to delete temp file: {}", path, e);
+                    }
+                });
+            log.debug("Cleaned up temp directory: {}", tempDir);
+        } catch (IOException e) {
+            log.warn("Failed to clean up temp directory: {}", tempDir, e);
+        }
     }
 }
