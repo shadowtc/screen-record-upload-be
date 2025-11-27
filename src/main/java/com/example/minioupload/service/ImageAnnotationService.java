@@ -27,8 +27,8 @@ public class ImageAnnotationService {
      * 
      * @param imageObjectKey MinIO对象键
      * @param text 要渲染的文字
-     * @param pdfX PDF坐标X（左边）
-     * @param pdfY PDF坐标Y（底边）
+     * @param pdfX PDF坐标X（左上角X）
+     * @param pdfY PDF坐标Y（左上角Y）
      * @param pdfWidth PDF坐标宽度
      * @param pdfHeight PDF坐标高度
      * @param outputFile 输出文件
@@ -65,11 +65,11 @@ public class ImageAnnotationService {
         double scaleY = imageHeight / pagePdfHeight;
         
         // 转换PDF坐标到图片坐标
-        // PDF坐标系：左下角为原点，向右为X正方向，向上为Y正方向
+        // PDF坐标系：左上角为原点，向右为X正方向，向下为Y正方向
         // 图片坐标系：左上角为原点，向右为X正方向，向下为Y正方向
-        // pdfY是底边坐标，需要加上pdfHeight得到顶边坐标，然后转换
+        // 坐标系统一致，直接按比例缩放即可
         int imageX = (int) Math.round(pdfX * scaleX);
-        int imageY = (int) Math.round((pagePdfHeight - (pdfY + pdfHeight)) * scaleY);
+        int imageY = (int) Math.round(pdfY * scaleY);
         int rectWidth = (int) Math.round(pdfWidth * scaleX);
         int rectHeight = (int) Math.round(pdfHeight * scaleY);
         

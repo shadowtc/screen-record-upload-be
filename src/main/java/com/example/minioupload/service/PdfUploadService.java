@@ -1182,7 +1182,9 @@ public class PdfUploadService {
             } finally {
                 g2d.dispose();
             }
-            ImageIO.write(image, format.toUpperCase(), tempFile);
+            // 使用正确的格式名称：jpg -> JPEG, png -> PNG
+            String imageFormat = format.equals("jpg") ? "JPEG" : "PNG";
+            ImageIO.write(image, imageFormat, tempFile);
         }
         
         // 上传到MinIO
@@ -1228,11 +1230,11 @@ public class PdfUploadService {
         double scaleY = imageHeight / pagePdfHeight;
         
         // 转换PDF坐标到图片坐标
-        // PDF坐标系：左下角为原点，向右为X正方向，向上为Y正方向
+        // PDF坐标系：左上角为原点，向右为X正方向，向下为Y正方向
         // 图片坐标系：左上角为原点，向右为X正方向，向下为Y正方向
-        // pdfY是底边坐标，需要加上pdfHeight得到顶边坐标，然后转换
+        // 坐标系统一致，直接按比例缩放即可
         int imageX = (int) Math.round(pdfX * scaleX);
-        int imageY = (int) Math.round((pagePdfHeight - (pdfY + pdfHeight)) * scaleY);
+        int imageY = (int) Math.round(pdfY * scaleY);
         int rectWidth = (int) Math.round(pdfWidth * scaleX);
         int rectHeight = (int) Math.round(pdfHeight * scaleY);
         
