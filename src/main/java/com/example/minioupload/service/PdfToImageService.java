@@ -1,10 +1,14 @@
 package com.example.minioupload.service;
 
 import com.example.minioupload.config.PdfConversionProperties;
+import lombok.Builder;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.rendering.ImageType;
 import org.springframework.stereotype.Service;
@@ -293,5 +297,127 @@ public class PdfToImageService {
         try (PDDocument document = Loader.loadPDF(pdfFile)) {
             return document.getNumberOfPages();
         }
+    }
+    
+    /**
+     * 页面渲染信息，包含图片和PDF尺寸
+     */
+    @Data
+    @Builder
+    public static class PageRenderInfo {
+        private Integer pageNumber;
+        private String minioObjectKey;
+        private Integer imageWidth;
+        private Integer imageHeight;
+        private Double pdfWidth;
+        private Double pdfHeight;
+        private Long fileSize;
+    }
+    
+    /**
+     * 转换PDF页面为图片并上传到MinIO（返回详细信息）
+     * 
+     * @param pdfFile PDF文件
+     * @param userId 用户ID
+     * @param businessId 业务ID
+     * @param jobId 任务ID
+     * @param pageNumbers 需要转换的页码列表（从1开始）
+     * @param dpi 图片分辨率
+     * @param format 图片格式
+     * @return 页码到页面渲染信息的映射
+     * @throws IOException 转换或上传失败时抛出
+     */
+    public Map<Integer, PageRenderInfo> convertPagesToImagesAndUploadWithInfo(
+            File pdfFile, String userId, String businessId, 
+            String jobId, List<Integer> pageNumbers, 
+            int dpi, String format) throws IOException {
+        if (format == null || format.trim().isEmpty()) {
+            format = properties.getImageRendering().getFormat();
+            log.warn("Format is null or empty, using default: {}", format);
+        }
+        
+        log.info("Starting PDF to images conversion with info for jobId: {}, Pages: {}, DPI: {}, Format: {}", 
+            jobId, pageNumbers, dpi, format);
+        
+        Map<Integer, PageRenderInfo> pageInfoMap = new HashMap<>();
+        long startTime = System.currentTimeMillis();
+        
+        Path imageDir = Paths.get(properties.getTempDirectory(), jobId, "images");
+        Files.createDirectories(imageDir);
+        
+        try (PDDocument document = Loader.loadPDF(pdfFile)) {
+            PDFRenderer pdfRenderer = new PDFRenderer(document);
+            int pageCount = document.getNumberOfPages();
+            
+            log.info("PDF has {} pages, converting and uploading {} specific pages...", pageCount, pageNumbers.size());
+            
+            for (Integer pageNumber : pageNumbers) {
+                if (pageNumber < 1 || pageNumber > pageCount) {
+                    log.warn("Invalid page number: {}, skipping", pageNumber);
+                    continue;
+                }
+                
+                int pageIndex = pageNumber - 1;
+                long pageStartTime = System.currentTimeMillis();
+                
+                // 获取PDF页面尺寸
+                PDPage page = document.getPage(pageIndex);
+                PDRectangle mediaBox = page.getMediaBox();
+                double pdfWidth = mediaBox.getWidth();
+                double pdfHeight = mediaBox.getHeight();
+                
+                // 渲染图片
+                BufferedImage image = pdfRenderer.renderImageWithDPI(
+                    pageIndex, 
+                    dpi, 
+                    ImageType.RGB
+                );
+                
+                String imageFileName = String.format("page_%04d.%s", pageNumber, format.toLowerCase());
+                File imageFile = imageDir.resolve(imageFileName).toFile();
+                
+                ImageIO.write(image, format, imageFile);
+                
+                String minioObjectKey = String.format("pdf-images/%s/%s/%s/%s", 
+                    userId, businessId, jobId, imageFileName);
+                
+                minioStorageService.uploadFile(imageFile, minioObjectKey);
+                
+                // 构建页面信息
+                PageRenderInfo pageInfo = PageRenderInfo.builder()
+                    .pageNumber(pageNumber)
+                    .minioObjectKey(minioObjectKey)
+                    .imageWidth(image.getWidth())
+                    .imageHeight(image.getHeight())
+                    .pdfWidth(pdfWidth)
+                    .pdfHeight(pdfHeight)
+                    .fileSize(imageFile.length())
+                    .build();
+                
+                pageInfoMap.put(pageNumber, pageInfo);
+                
+                Files.deleteIfExists(imageFile.toPath());
+                
+                long pageTime = System.currentTimeMillis() - pageStartTime;
+                log.debug("Page {} rendered and uploaded in {}ms, PDF size: {}x{}, image size: {}x{}, key: {}", 
+                    pageNumber, pageTime, pdfWidth, pdfHeight, image.getWidth(), image.getHeight(), minioObjectKey);
+            }
+            
+            long totalTime = System.currentTimeMillis() - startTime;
+            log.info("Successfully converted and uploaded {} pages with info to MinIO in {}ms", 
+                pageInfoMap.size(), totalTime);
+            
+        } catch (IOException e) {
+            log.error("Failed to convert PDF pages to images with info for jobId: {}", jobId, e);
+            throw new IOException("PDF to images conversion with info failed: " + e.getMessage(), e);
+        } finally {
+            try {
+                Files.deleteIfExists(imageDir);
+            } catch (IOException e) {
+                log.warn("Failed to delete temp image directory: {}", imageDir, e);
+            }
+        }
+        
+        return pageInfoMap;
     }
 }

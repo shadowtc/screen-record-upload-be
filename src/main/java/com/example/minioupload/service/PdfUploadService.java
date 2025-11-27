@@ -565,11 +565,12 @@ public class PdfUploadService {
                 throw new IllegalArgumentException("No valid pages to convert");
             }
             
-            Map<Integer, String> minioObjectKeys = pdfToImageService.convertPagesToImagesAndUpload(
-                pdfFile, request.getUserId(), request.getBusinessId(), taskId, pagesToConvert, dpi, format);
+            Map<Integer, PdfToImageService.PageRenderInfo> pageRenderInfoMap = 
+                pdfToImageService.convertPagesToImagesAndUploadWithInfo(
+                    pdfFile, request.getUserId(), request.getBusinessId(), taskId, pagesToConvert, dpi, format);
             
-            savePageImages(taskId, request.getBusinessId(), request.getUserId(), request.getTenantId(),
-                minioObjectKeys, task.getIsBase());
+            savePageImagesWithInfo(taskId, request.getBusinessId(), request.getUserId(), request.getTenantId(),
+                pageRenderInfoMap, task.getIsBase(), dpi);
             
             long processingTime = System.currentTimeMillis() - startTime;
             
@@ -646,6 +647,56 @@ public class PdfUploadService {
             
             log.debug("Saved page image metadata: taskId={}, page={}, objectKey={}", 
                 taskId, pageNumber, objectKey);
+        }
+    }
+    
+    /**
+     * 保存页面图片元数据到数据库（包含PDF尺寸信息）
+     * 
+     * 为每个转换后的图片创建数据库记录，包含：
+     * - 任务ID、业务ID、用户ID、租户ID
+     * - 页码、MinIO对象键
+     * - 图片尺寸（像素）、PDF尺寸（点）、渲染DPI
+     * - 是否为基础转换标识
+     * 
+     * @param taskId 任务ID
+     * @param businessId 业务ID
+     * @param userId 用户ID
+     * @param tenantId 租户ID
+     * @param pageRenderInfoMap 页码到页面渲染信息的映射
+     * @param isBase 是否为基础转换
+     * @param dpi 渲染DPI
+     */
+    @Transactional
+    protected void savePageImagesWithInfo(String taskId, String businessId, String userId, String tenantId,
+                                          Map<Integer, PdfToImageService.PageRenderInfo> pageRenderInfoMap, 
+                                          boolean isBase, int dpi) {
+        for (Map.Entry<Integer, PdfToImageService.PageRenderInfo> entry : pageRenderInfoMap.entrySet()) {
+            int pageNumber = entry.getKey();
+            PdfToImageService.PageRenderInfo renderInfo = entry.getValue();
+            
+            PdfPageImage pageImage = PdfPageImage.builder()
+                .taskId(taskId)
+                .businessId(businessId)
+                .userId(userId)
+                .tenantId(tenantId)
+                .pageNumber(pageNumber)
+                .imageObjectKey(renderInfo.getMinioObjectKey())
+                .isBase(isBase)
+                .width(renderInfo.getImageWidth())
+                .height(renderInfo.getImageHeight())
+                .pdfWidth(renderInfo.getPdfWidth())
+                .pdfHeight(renderInfo.getPdfHeight())
+                .renderingDpi(dpi)
+                .fileSize(renderInfo.getFileSize())
+                .build();
+            
+            pageImageRepository.insert(pageImage);
+            
+            log.debug("Saved page image metadata with info: taskId={}, page={}, objectKey={}, pdfSize={}x{}, imageSize={}x{}, dpi={}", 
+                taskId, pageNumber, renderInfo.getMinioObjectKey(), 
+                renderInfo.getPdfWidth(), renderInfo.getPdfHeight(),
+                renderInfo.getImageWidth(), renderInfo.getImageHeight(), dpi);
         }
     }
     
@@ -1069,8 +1120,18 @@ public class PdfUploadService {
         int pageNumber = baseImage.getPageNumber();
         String baseObjectKey = baseImage.getImageObjectKey();
         
-        log.debug("Rendering page {} with {} annotations from {}", 
-            pageNumber, annotations.size(), baseObjectKey);
+        // 检查PDF尺寸信息
+        if (baseImage.getPdfWidth() == null || baseImage.getPdfHeight() == null) {
+            throw new IOException("PDF dimensions not available for page " + pageNumber + 
+                ". Please re-upload the PDF to generate dimension information.");
+        }
+        
+        double pagePdfWidth = baseImage.getPdfWidth();
+        double pagePdfHeight = baseImage.getPdfHeight();
+        
+        log.debug("Rendering page {} with {} annotations from {}, PDF size: {}x{}, image size: {}x{}", 
+            pageNumber, annotations.size(), baseObjectKey, pagePdfWidth, pagePdfHeight,
+            baseImage.getWidth(), baseImage.getHeight());
         
         // 下载并渲染第一个注解
         PdfAnnotationPreviewRequest.PageAnnotation firstAnnotation = annotations.get(0);
@@ -1096,7 +1157,9 @@ public class PdfUploadService {
             baseObjectKey,
             firstAnnotation.getContents(),
             x, y, width, height,
-            tempFile
+            tempFile,
+            pagePdfWidth,
+            pagePdfHeight
         );
         
         // 如果有多个注解，继续在图片上渲染
@@ -1111,7 +1174,8 @@ public class PdfUploadService {
                     PdfAnnotationPreviewRequest.PageAnnotation annotation = annotations.get(i);
                     double[] coords = annotation.getPdf();
                     if (coords != null && coords.length >= 4) {
-                        drawAnnotationOnImage(g2d, annotation, image.getHeight());
+                        drawAnnotationOnImage(g2d, annotation, baseImage.getWidth(), baseImage.getHeight(),
+                            pagePdfWidth, pagePdfHeight);
                     }
                 }
             } finally {
@@ -1145,42 +1209,53 @@ public class PdfUploadService {
      */
     private void drawAnnotationOnImage(Graphics2D g2d, 
             PdfAnnotationPreviewRequest.PageAnnotation annotation, 
-            int imageHeight) {
+            int imageWidth,
+            int imageHeight,
+            double pagePdfWidth,
+            double pagePdfHeight) {
         
         double[] coords = annotation.getPdf();
-        double x = coords[0];
-        double y = coords[1];
-        double x2 = coords[2];
-        double y2 = coords[3];
-        double width = x2 - x;
-        double height = y2 - y;
+        double pdfX = coords[0];
+        double pdfY = coords[1];
+        double pdfX2 = coords[2];
+        double pdfY2 = coords[3];
+        double pdfWidth = pdfX2 - pdfX;
+        double pdfHeight = pdfY2 - pdfY;
         
-        // 转换坐标
-        int textX = (int) x;
-        int textY = imageHeight - (int) y;
-        int textWidth = (int) width;
-        int textHeight = (int) height;
+        // 计算PDF坐标到图片坐标的缩放比例
+        double scaleX = imageWidth / pagePdfWidth;
+        double scaleY = imageHeight / pagePdfHeight;
+        
+        // 转换PDF坐标到图片坐标
+        // PDF坐标系：左下角为原点，向右为X正方向，向上为Y正方向
+        // 图片坐标系：左上角为原点，向右为X正方向，向下为Y正方向
+        // pdfY是底边坐标，需要加上pdfHeight得到顶边坐标，然后转换
+        int imageX = (int) Math.round(pdfX * scaleX);
+        int imageY = (int) Math.round((pagePdfHeight - (pdfY + pdfHeight)) * scaleY);
+        int rectWidth = (int) Math.round(pdfWidth * scaleX);
+        int rectHeight = (int) Math.round(pdfHeight * scaleY);
         
         // 绘制背景
         g2d.setColor(new Color(255, 255, 255, 200));
-        g2d.fillRect(textX, textY - textHeight, textWidth, textHeight);
+        g2d.fillRect(imageX, imageY, rectWidth, rectHeight);
         
         // 绘制边框
         g2d.setColor(Color.BLACK);
         g2d.setStroke(new BasicStroke(2.0f));
-        g2d.drawRect(textX, textY - textHeight, textWidth, textHeight);
+        g2d.drawRect(imageX, imageY, rectWidth, rectHeight);
         
-        // 绘制文字
-        int maxFontSize = Math.min(textWidth / (annotation.getContents().length() + 1), textHeight - 10);
+        // 根据实际像素尺寸计算合适的字体大小
+        String text = annotation.getContents();
+        int maxFontSize = Math.min(rectWidth / (text.length() + 1), rectHeight - 10);
         maxFontSize = Math.max(12, Math.min(maxFontSize, 48));
         Font font = new Font("SansSerif", Font.PLAIN, maxFontSize);
         g2d.setFont(font);
         g2d.setColor(Color.BLACK);
         
         FontMetrics fm = g2d.getFontMetrics();
-        int textDrawX = textX + (textWidth - fm.stringWidth(annotation.getContents())) / 2;
-        int textDrawY = textY - textHeight + (textHeight + fm.getAscent() - fm.getDescent()) / 2;
-        g2d.drawString(annotation.getContents(), textDrawX, textDrawY);
+        int textDrawX = imageX + (rectWidth - fm.stringWidth(text)) / 2;
+        int textDrawY = imageY + (rectHeight + fm.getAscent() - fm.getDescent()) / 2;
+        g2d.drawString(text, textDrawX, textDrawY);
     }
     
     /**
