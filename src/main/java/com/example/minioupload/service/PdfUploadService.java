@@ -28,6 +28,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
@@ -576,8 +577,8 @@ public class PdfUploadService {
             
             updateTaskStatus(taskId, "COMPLETED", null);
             
-            log.info("PDF to images conversion completed for taskId: {} in {}ms, pages: {}, images: {}", 
-                taskId, processingTime, pagesToConvert.size(), minioObjectKeys.size());
+//            log.info("PDF to images conversion completed for taskId: {} in {}ms, pages: {}, images: {}",
+//                taskId, processingTime, pagesToConvert.size(), minioObjectKeys.size());
             
         } catch (Exception e) {
             log.error("PDF to images conversion failed for taskId: {}", taskId, e);
