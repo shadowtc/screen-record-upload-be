@@ -1153,12 +1153,23 @@ public class PdfUploadService {
             throw new IOException("Invalid PDF coordinates for annotation: " + firstAnnotation.getId());
         }
         
+        // 参考 getFillPdf 的逻辑：x取第0个元素，y取第3个元素
         double x = pdfCoords[0];
-        double y = pdfCoords[1];
-        double x2 = pdfCoords[2];
-        double y2 = pdfCoords[3];
-        double width = x2 - x;
-        double height = y2 - y;
+        double yBottom = pdfCoords[3];  // 底部y（getFillPdf的逻辑）
+        
+        // 宽度和高度从坐标计算（后面会从normalized覆盖）
+        double width = pdfCoords[2] - pdfCoords[0];
+        double height = pdfCoords[3] - pdfCoords[1];
+        
+        // 根据 normalized 获取宽度和高度（参考 getFillPdf 的逻辑）
+        if (firstAnnotation.getNormalized() != null) {
+            width = Double.parseDouble(firstAnnotation.getNormalized().getWidth());
+            height = Double.parseDouble(firstAnnotation.getNormalized().getHeight());
+        }
+        
+        // getFillPdf使用底部y，但renderTextOnImage需要顶部y
+        // 因此需要将底部y转换为顶部y：topY = bottomY - height
+        double y = yBottom - height;
         
         // 创建临时文件
         String format = baseObjectKey.toLowerCase().endsWith(".png") ? "png" : "jpg";
@@ -1220,6 +1231,7 @@ public class PdfUploadService {
     
     /**
      * 在已有图片上绘制注解
+     * 坐标计算逻辑参考 getFillPdf 方法
      */
     private void drawAnnotationOnImage(Graphics2D g2d, 
             PdfAnnotationPreviewRequest.PageAnnotation annotation, 
@@ -1229,23 +1241,30 @@ public class PdfUploadService {
             double pagePdfHeight) {
         
         double[] coords = annotation.getPdf();
+        // 参考 getFillPdf 的逻辑：x取第0个元素，y取第3个元素
         double pdfX = coords[0];
-        double pdfY = coords[1];
-        double pdfX2 = coords[2];
-        double pdfY2 = coords[3];
-        double pdfWidth = pdfX2 - pdfX;
-        double pdfHeight = pdfY2 - pdfY;
+        double pdfY = coords[3];
+        
+        // 宽度和高度从 normalized 对象获取（参考 getFillPdf 的逻辑）
+        double pdfWidth;
+        double pdfHeight;
+        if (annotation.getNormalized() != null) {
+            pdfWidth = Double.parseDouble(annotation.getNormalized().getWidth());
+            pdfHeight = Double.parseDouble(annotation.getNormalized().getHeight());
+        } else {
+            // 降级方案：从坐标计算
+            pdfWidth = coords[2] - coords[0];
+            pdfHeight = coords[3] - coords[1];
+        }
         
         // 计算PDF坐标到图片坐标的缩放比例
         double scaleX = imageWidth / pagePdfWidth;
         double scaleY = imageHeight / pagePdfHeight;
         
         // 转换PDF坐标到图片坐标
-        // PDF坐标系：左上角为原点，向右为X正方向，向下为Y正方向
-        // 图片坐标系：左上角为原点，向右为X正方向，向下为Y正方向
-        // 坐标系统一致，直接按比例缩放即可
+        // 注意：getFillPdf 使用 y=coords[3] 表示矩形底部，需要调整为顶部位置
         int imageX = (int) Math.round(pdfX * scaleX);
-        int imageY = (int) Math.round(pdfY * scaleY);
+        int imageY = (int) Math.round((pdfY - pdfHeight) * scaleY);
         int rectWidth = (int) Math.round(pdfWidth * scaleX);
         int rectHeight = (int) Math.round(pdfHeight * scaleY);
         
