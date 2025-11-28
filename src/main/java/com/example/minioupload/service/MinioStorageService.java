@@ -344,6 +344,10 @@ public class MinioStorageService {
 //     */
     @SneakyThrows(Exception.class)
     public InputStream getObject(String bucketName, String objectName) {
-        return s3Client.getObject((Consumer<GetObjectRequest.Builder>) GetObjectArgs.builder().bucket(bucketName).object(objectName).build());
+        GetObjectRequest request = GetObjectRequest.builder()
+                .bucket(bucketName)
+                .key(objectName)
+                .build();
+        return s3Client.getObject(request);
     }
 }
