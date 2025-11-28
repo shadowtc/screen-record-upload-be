@@ -1,17 +1,12 @@
 package com.example.minioupload.service;
 
-import cn.hutool.core.collection.CollectionUtil;
-import cn.hutool.json.JSONUtil;
 import com.example.minioupload.config.PdfConversionProperties;
 import com.example.minioupload.config.S3ConfigProperties;
 import com.example.minioupload.dto.*;
 import com.example.minioupload.model.PdfConversionTask;
 import com.example.minioupload.model.PdfPageImage;
-import com.example.minioupload.model.enums.PresetSignatureTypeEnum;
 import com.example.minioupload.repository.PdfConversionTaskRepository;
 import com.example.minioupload.repository.PdfPageImageRepository;
-import com.example.minioupload.utils.PdfUtils;
-import com.example.minioupload.utils.StringUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -34,7 +29,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
-import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -1335,97 +1329,97 @@ public class PdfUploadService {
         }
     }
 
-    public String getFillPdf(GetFillPdfDto getFillPdfDto) {
-        try {
-            String objectName = getFillPdfDto.getObjectName();
-            String markJson = getFillPdfDto.getMarkJson();
-            String fillPdfBase64 = getFillInformedPdf(objectName,
-                    null, markJson, null);
-            String ossId = String.valueOf(System.currentTimeMillis());
-            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM");
-            String uploadDir = "temp"+ File.separator+sdf.format(new Date())+File.separator;
-            String newFileName = uploadDir + ossId + ".pdf";
-            minioStorageService.uploadFileByBase64(miniOConfig.getBucket(),fillPdfBase64,newFileName);
-            String previewUrl = minioStorageService.getPresignedObjectUrlForPreview(miniOConfig.getBucket(), newFileName);
-            return previewUrl;
-        } catch (Exception e) {
-            log.error("填充PDF失败：{}", e.getMessage(), e);
-        }
-    }
-
-
-    public String getFillInformedPdf(String objectName,
-                                     PresetSignatureTypeEnum fillTypeEnum,
-                                     String markJson,
-                                     Map<String, String> fillMap) throws IOException {
-        // 2. 通过MinIO获取文件流并转换为base64
-        String pdfBase64 = readFileFromMinio(objectName);
-        if(StringUtils.isEmpty(markJson)){
-
-        }
-        MarkJsonDto markJsonDto = JSONUtil.toBean(markJson, MarkJsonDto.class);
-        // 3. 遍历所有页面的注释，填充PDF内容
-        String filledPdfBase64 = pdfBase64;
-        for (Map.Entry<String, List<AnnotationDto>> pageEntry : markJsonDto.getPageAnnotations().entrySet()) {
-            int pageIndex = Integer.parseInt(pageEntry.getKey()) - 1; // 页码从0开始
-            List<AnnotationDto> annotations = pageEntry.getValue();
-
-            for (AnnotationDto annotation : annotations) {
-                // 获取坐标信息：x取pdf的第一个元素，y取pdf的第四个元素
-                List<Double> pdfCoords = annotation.getPdf();
-                double x = pdfCoords.get(0);
-                double y = pdfCoords.get(3);
-
-                // 宽度和高度取normalized的width和height
-                NormalizedDto normalized = annotation.getNormalized();
-                float width = Float.parseFloat(normalized.getWidth());
-                float height = Float.parseFloat(normalized.getHeight());
-
-                // 获取待填充的内容
-                String markValue = annotation.getMarkValue();
-                PresetSignatureTypeEnum presetSignatureTypeEnum = PresetSignatureTypeEnum.typeOf(markValue);
-                if (presetSignatureTypeEnum == null) {
-                    continue;
-                }
-                String name = presetSignatureTypeEnum.getName();
-                //如果有填充的map去填充map中的值
-                if (CollectionUtil.isNotEmpty(fillMap)) {
-                    //如果是受试者签字
-                    boolean isSubjectSignature = fillTypeEnum == PresetSignatureTypeEnum.SUBJECT_SIGNATURE;
-                    boolean isInvestigatorSignature = fillTypeEnum == PresetSignatureTypeEnum.INVESTIGATOR_SIGNATURE;
-                    if ((isSubjectSignature && markValue.startsWith("piSign")) ||
-                            (isInvestigatorSignature && !markValue.startsWith("piSign"))) {
-                        continue;
-                    }
-
-                    name = fillMap.get(markValue);
-
-                }
-                if (StringUtils.isNotEmpty(name)) {
-                    // 调用PdfUtils.writeTextToPdf填充文本
-                    filledPdfBase64 = PdfUtils.writeTextToPdf(filledPdfBase64, pageIndex, PdfUtils.pxToPt(x),PdfUtils.pxToPt(y), width, height, name);
-                }
-            }
-        }
-
-        //4. 返回填充后的PDF base64数据给前端
-        return filledPdfBase64;
-    }
-
-    public String readFileFromMinio(String objectName) throws IOException {
-        try {
-            log.info("开始通过MinIO读取PDF文件：{}", objectName);
-
-            // 使用MinioUtils获取文件流
-            try (InputStream inputStream = minioStorageService.getObject(miniOConfig.getBucket(), objectName)) {
-                byte[] fileBytes = inputStream.readAllBytes();
-                log.info("成功通过MinIO读取PDF文件，大小：{} bytes", fileBytes.length);
-                return Base64.getEncoder().encodeToString(fileBytes);
-            }
-
-        } catch (Exception e) {
-            log.error("通过MinIO读取PDF文件失败：{}", e.getMessage(), e);
-            throw new IOException("通过MinIO读取PDF文件失败：" + e.getMessage(), e);
-        }
-    }
+//    public String getFillPdf(GetFillPdfDto getFillPdfDto) {
+//        try {
+//            String objectName = getFillPdfDto.getObjectName();
+//            String markJson = getFillPdfDto.getMarkJson();
+//            String fillPdfBase64 = getFillInformedPdf(objectName,
+//                    null, markJson, null);
+//            String ossId = String.valueOf(System.currentTimeMillis());
+//            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM");
+//            String uploadDir = "temp"+ File.separator+sdf.format(new Date())+File.separator;
+//            String newFileName = uploadDir + ossId + ".pdf";
+//            minioStorageService.uploadFileByBase64(miniOConfig.getBucket(),fillPdfBase64,newFileName);
+//            String previewUrl = minioStorageService.getPresignedObjectUrlForPreview(miniOConfig.getBucket(), newFileName);
+//            return previewUrl;
+//        } catch (Exception e) {
+//            log.error("填充PDF失败：{}", e.getMessage(), e);
+//        }
+//    }
+//
+//
+//    public String getFillInformedPdf(String objectName,
+//                                     PresetSignatureTypeEnum fillTypeEnum,
+//                                     String markJson,
+//                                     Map<String, String> fillMap) throws IOException {
+//        // 2. 通过MinIO获取文件流并转换为base64
+//        String pdfBase64 = readFileFromMinio(objectName);
+//        if(StringUtils.isEmpty(markJson)){
+//
+//        }
+//        MarkJsonDto markJsonDto = JSONUtil.toBean(markJson, MarkJsonDto.class);
+//        // 3. 遍历所有页面的注释，填充PDF内容
+//        String filledPdfBase64 = pdfBase64;
+//        for (Map.Entry<String, List<AnnotationDto>> pageEntry : markJsonDto.getPageAnnotations().entrySet()) {
+//            int pageIndex = Integer.parseInt(pageEntry.getKey()) - 1; // 页码从0开始
+//            List<AnnotationDto> annotations = pageEntry.getValue();
+//
+//            for (AnnotationDto annotation : annotations) {
+//                // 获取坐标信息：x取pdf的第一个元素，y取pdf的第四个元素
+//                List<Double> pdfCoords = annotation.getPdf();
+//                double x = pdfCoords.get(0);
+//                double y = pdfCoords.get(3);
+//
+//                // 宽度和高度取normalized的width和height
+//                NormalizedDto normalized = annotation.getNormalized();
+//                float width = Float.parseFloat(normalized.getWidth());
+//                float height = Float.parseFloat(normalized.getHeight());
+//
+//                // 获取待填充的内容
+//                String markValue = annotation.getMarkValue();
+//                PresetSignatureTypeEnum presetSignatureTypeEnum = PresetSignatureTypeEnum.typeOf(markValue);
+//                if (presetSignatureTypeEnum == null) {
+//                    continue;
+//                }
+//                String name = presetSignatureTypeEnum.getName();
+//                //如果有填充的map去填充map中的值
+//                if (CollectionUtil.isNotEmpty(fillMap)) {
+//                    //如果是受试者签字
+//                    boolean isSubjectSignature = fillTypeEnum == PresetSignatureTypeEnum.SUBJECT_SIGNATURE;
+//                    boolean isInvestigatorSignature = fillTypeEnum == PresetSignatureTypeEnum.INVESTIGATOR_SIGNATURE;
+//                    if ((isSubjectSignature && markValue.startsWith("piSign")) ||
+//                            (isInvestigatorSignature && !markValue.startsWith("piSign"))) {
+//                        continue;
+//                    }
+//
+//                    name = fillMap.get(markValue);
+//
+//                }
+//                if (StringUtils.isNotEmpty(name)) {
+//                    // 调用PdfUtils.writeTextToPdf填充文本
+//                    filledPdfBase64 = PdfUtils.writeTextToPdf(filledPdfBase64, pageIndex, PdfUtils.pxToPt(x),PdfUtils.pxToPt(y), width, height, name);
+//                }
+//            }
+//        }
+//
+//        //4. 返回填充后的PDF base64数据给前端
+//        return filledPdfBase64;
+//    }
+//
+//    public String readFileFromMinio(String objectName) throws IOException {
+//        try {
+//            log.info("开始通过MinIO读取PDF文件：{}", objectName);
+//
+//            // 使用MinioUtils获取文件流
+//            try (InputStream inputStream = minioStorageService.getObject(miniOConfig.getBucket(), objectName)) {
+//                byte[] fileBytes = inputStream.readAllBytes();
+//                log.info("成功通过MinIO读取PDF文件，大小：{} bytes", fileBytes.length);
+//                return Base64.getEncoder().encodeToString(fileBytes);
+//            }
+//
+//        } catch (Exception e) {
+//            log.error("通过MinIO读取PDF文件失败：{}", e.getMessage(), e);
+//            throw new IOException("通过MinIO读取PDF文件失败：" + e.getMessage(), e);
+//        }
+//    }
 }
