@@ -26,6 +26,7 @@ import java.time.Duration;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * MinIO存储服务
@@ -341,8 +342,8 @@ public class MinioStorageService {
 //     * @param objectName 文件名
 //     * @return 二进制流
 //     */
-//    @SneakyThrows(Exception.class)
-//    public InputStream getObject(String bucketName, String objectName) {
-//        return minioClient.getObject(GetObjectArgs.builder().bucket(bucketName).object(objectName).build());
-//    }
+    @SneakyThrows(Exception.class)
+    public InputStream getObject(String bucketName, String objectName) {
+        return s3Client.getObject((Consumer<GetObjectRequest.Builder>) GetObjectArgs.builder().bucket(bucketName).object(objectName).build());
+    }
 }
