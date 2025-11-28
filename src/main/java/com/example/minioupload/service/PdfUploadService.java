@@ -23,7 +23,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.imageio.ImageIO;
-import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -73,7 +72,6 @@ public class PdfUploadService {
     private final PdfConversionTaskRepository taskRepository;
     private final PdfPageImageRepository pageImageRepository;
     private final ObjectMapper objectMapper;
-    private final ImageAnnotationService imageAnnotationService;
 
     @Autowired
     private S3ConfigProperties miniOConfig;
@@ -85,8 +83,7 @@ public class PdfUploadService {
             @Qualifier("videoCompressionExecutor") Executor videoCompressionExecutor,
             PdfConversionTaskRepository taskRepository,
             PdfPageImageRepository pageImageRepository,
-            ObjectMapper objectMapper,
-            ImageAnnotationService imageAnnotationService) {
+            ObjectMapper objectMapper) {
         this.properties = properties;
         this.pdfToImageService = pdfToImageService;
         this.minioStorageService = minioStorageService;
@@ -94,7 +91,6 @@ public class PdfUploadService {
         this.taskRepository = taskRepository;
         this.pageImageRepository = pageImageRepository;
         this.objectMapper = objectMapper;
-        this.imageAnnotationService = imageAnnotationService;
     }
     
     /**
@@ -989,7 +985,7 @@ public class PdfUploadService {
      * 核心流程：
      * 1. 根据businessId和tenantId查找isBase=1的基类任务
      * 2. 获取基类的所有页面图片
-     * 3. 根据pageAnnotations对指定页面进行注解渲染
+     * 3. 根据注解信息先对PDF进行填充，再将填充后的PDF转换为图片
      * 4. 返回所有页面图片（被渲染的页面使用新图片，其他页面使用原图）
      * 
      * @param request 预览请求，包含businessId、tenantId和注解信息
@@ -999,7 +995,6 @@ public class PdfUploadService {
         log.info("Preview with annotations - businessId: {}, tenantId: {}, totalAnnotations: {}", 
             request.getBusinessId(), request.getTenantId(), request.getTotalAnnotations());
         
-        // 验证参数
         if (request.getBusinessId() == null || request.getBusinessId().trim().isEmpty()) {
             return PdfAnnotationPreviewResponse.builder()
                 .status("ERROR")
@@ -1014,7 +1009,6 @@ public class PdfUploadService {
                 .build();
         }
         
-        // 查找基类任务
         PdfConversionTask baseTask = taskRepository.findByBusinessIdAndTenantIdAndIsBaseTrue(
             request.getBusinessId(), request.getTenantId());
         
@@ -1029,7 +1023,6 @@ public class PdfUploadService {
                 .build();
         }
         
-        // 获取基类的所有页面图片
         List<PdfPageImage> baseImages = pageImageRepository.findByBusinessIdAndTenantIdAndIsBaseTrueOrderByPageNumberAsc(
             request.getBusinessId(), request.getTenantId());
         
@@ -1044,53 +1037,48 @@ public class PdfUploadService {
                 .build();
         }
         
-        // 创建临时目录用于存储渲染后的图片
         Path tempDir = null;
         try {
             tempDir = Files.createTempDirectory("pdf-annotation-preview-");
             log.debug("Created temp directory: {}", tempDir);
             
-            // 需要渲染的页面映射
-            Map<Integer, List<PdfAnnotationPreviewRequest.PageAnnotation>> pageAnnotationsMap = new HashMap<>();
-            if (request.getPageAnnotations() != null) {
-                for (Map.Entry<String, List<PdfAnnotationPreviewRequest.PageAnnotation>> entry : 
-                        request.getPageAnnotations().entrySet()) {
-                    try {
-                        int pageNumber = Integer.parseInt(entry.getKey());
-                        pageAnnotationsMap.put(pageNumber, entry.getValue());
-                    } catch (NumberFormatException e) {
-                        log.warn("Invalid page number: {}", entry.getKey());
-                    }
+            String markJson = prepareMarkJson(request, baseTask);
+            if (markJson != null && !markJson.trim().isEmpty()) {
+                request.setMarkJson(markJson);
+            }
+            
+            Set<Integer> pagesToRender = extractPageNumbers(request);
+            Map<Integer, PdfAnnotationPreviewResponse.PageImageInfo> renderedPageMap = new HashMap<>();
+            if (!pagesToRender.isEmpty()) {
+                if (markJson == null || markJson.trim().isEmpty()) {
+                    return PdfAnnotationPreviewResponse.builder()
+                        .status("ERROR")
+                        .message("markJson is required when annotations are provided")
+                        .businessId(request.getBusinessId())
+                        .tenantId(request.getTenantId())
+                        .build();
                 }
+                renderedPageMap = renderAnnotatedPagesFromPdf(
+                    baseTask,
+                    baseImages,
+                    pagesToRender,
+                    markJson,
+                    request,
+                    tempDir
+                );
             }
             
             List<PdfAnnotationPreviewResponse.PageImageInfo> resultImages = new ArrayList<>();
-            int renderedCount = 0;
-            
-            // 处理每一页
             for (PdfPageImage baseImage : baseImages) {
-                int pageNumber = baseImage.getPageNumber();
-                List<PdfAnnotationPreviewRequest.PageAnnotation> annotations = pageAnnotationsMap.get(pageNumber);
-                
-                if (annotations != null && !annotations.isEmpty()) {
-                    // 需要渲染注解的页面
-                    try {
-                        PdfAnnotationPreviewResponse.PageImageInfo renderedImage = 
-                            renderPageWithAnnotations(baseImage, annotations, tempDir);
-                        resultImages.add(renderedImage);
-                        renderedCount++;
-                        log.info("Rendered page {} with {} annotations", pageNumber, annotations.size());
-                    } catch (Exception e) {
-                        log.error("Failed to render page {}: {}", pageNumber, e.getMessage(), e);
-                        // 渲染失败，使用原图
-                        resultImages.add(createPageImageInfo(baseImage, false));
-                    }
+                PdfAnnotationPreviewResponse.PageImageInfo rendered = renderedPageMap.get(baseImage.getPageNumber());
+                if (rendered != null) {
+                    resultImages.add(rendered);
                 } else {
-                    // 不需要渲染的页面，直接使用原图
                     resultImages.add(createPageImageInfo(baseImage, false));
                 }
             }
             
+            int renderedCount = renderedPageMap.size();
             log.info("Preview completed - businessId: {}, totalPages: {}, renderedPages: {}", 
                 request.getBusinessId(), baseImages.size(), renderedCount);
             
@@ -1114,181 +1102,200 @@ public class PdfUploadService {
                 .tenantId(request.getTenantId())
                 .build();
         } finally {
-            // 清理临时目录
             if (tempDir != null) {
                 cleanupTempDirectory(tempDir);
             }
         }
     }
-    
+
     /**
-     * 渲染单个页面的注解
+     * 将注解内容写入PDF后渲染指定页面为图片
      */
-    private PdfAnnotationPreviewResponse.PageImageInfo renderPageWithAnnotations(
-            PdfPageImage baseImage,
-            List<PdfAnnotationPreviewRequest.PageAnnotation> annotations,
+    private Map<Integer, PdfAnnotationPreviewResponse.PageImageInfo> renderAnnotatedPagesFromPdf(
+            PdfConversionTask baseTask,
+            List<PdfPageImage> baseImages,
+            Set<Integer> pagesToRender,
+            String markJson,
+            PdfAnnotationPreviewRequest request,
             Path tempDir) throws IOException {
-        
-        int pageNumber = baseImage.getPageNumber();
-        String baseObjectKey = baseImage.getImageObjectKey();
-        
-        // 检查PDF尺寸信息
-        if (baseImage.getPdfWidth() == null || baseImage.getPdfHeight() == null) {
-            throw new IOException("PDF dimensions not available for page " + pageNumber + 
-                ". Please re-upload the PDF to generate dimension information.");
+        Map<Integer, PdfAnnotationPreviewResponse.PageImageInfo> renderedPages = new HashMap<>();
+        if (pagesToRender.isEmpty()) {
+            return renderedPages;
+        }
+        if (StringUtils.isEmpty(markJson)) {
+            throw new IOException("markJson cannot be empty when rendering annotations");
+        }
+        if (StringUtils.isEmpty(baseTask.getPdfObjectKey())) {
+            throw new IOException("PDF object key is missing for base task");
         }
         
-        double pagePdfWidth = baseImage.getPdfWidth();
-        double pagePdfHeight = baseImage.getPdfHeight();
-        
-        log.debug("Rendering page {} with {} annotations from {}, PDF size: {}x{}, image size: {}x{}", 
-            pageNumber, annotations.size(), baseObjectKey, pagePdfWidth, pagePdfHeight,
-            baseImage.getWidth(), baseImage.getHeight());
-        
-        // 下载并渲染第一个注解
-        PdfAnnotationPreviewRequest.PageAnnotation firstAnnotation = annotations.get(0);
-        double[] pdfCoords = firstAnnotation.getPdf();
-        
-        if (pdfCoords == null || pdfCoords.length < 4) {
-            throw new IOException("Invalid PDF coordinates for annotation: " + firstAnnotation.getId());
+        String filledPdfBase64 = getFillInformedPdf(baseTask.getPdfObjectKey(), null, markJson, null);
+        if (StringUtils.isEmpty(filledPdfBase64)) {
+            throw new IOException("Failed to generate annotated PDF");
         }
         
-        // 参考 getFillPdf 的逻辑：x取第0个元素，y取第3个元素
-        double x = pdfCoords[0];
-        double yBottom = pdfCoords[3];  // 底部y（getFillPdf的逻辑）
+        Path annotatedPdfPath = tempDir.resolve("annotated.pdf");
+        Files.write(annotatedPdfPath, Base64.getDecoder().decode(filledPdfBase64));
+        File annotatedPdfFile = annotatedPdfPath.toFile();
         
-        // 宽度和高度从坐标计算（后面会从normalized覆盖）
-        double width = pdfCoords[2] - pdfCoords[0];
-        double height = pdfCoords[3] - pdfCoords[1];
+        int dpi = determineRenderingDpi(baseImages);
+        String format = determineImageFormat(baseImages);
+        List<Integer> sortedPages = pagesToRender.stream().sorted().collect(Collectors.toList());
+        String jobId = "preview-" + UUID.randomUUID();
         
-        // 根据 normalized 获取宽度和高度（参考 getFillPdf 的逻辑）
-        if (firstAnnotation.getNormalized() != null) {
-            width = Double.parseDouble(firstAnnotation.getNormalized().getWidth());
-            height = Double.parseDouble(firstAnnotation.getNormalized().getHeight());
-        }
-        
-        // getFillPdf使用底部y，但renderTextOnImage需要顶部y
-        // 因此需要将底部y转换为顶部y：topY = bottomY - height
-        double y = yBottom - height;
-        
-        // 创建临时文件
-        String format = baseObjectKey.toLowerCase().endsWith(".png") ? "png" : "jpg";
-        File tempFile = tempDir.resolve("page_" + pageNumber + "_rendered." + format).toFile();
-        
-        // 渲染第一个注解
-        ImageAnnotationService.RenderedImageInfo renderedInfo = imageAnnotationService.renderTextOnImage(
-            baseObjectKey,
-            firstAnnotation.getContents(),
-            x, y, width, height,
-            tempFile,
-            pagePdfWidth,
-            pagePdfHeight
+        Map<Integer, String> renderedFiles = pdfToImageService.convertSpecificPagesToImages(
+            annotatedPdfFile,
+            jobId,
+            sortedPages,
+            dpi,
+            format
         );
         
-        // 如果有多个注解，继续在图片上渲染
-        if (annotations.size() > 1) {
-            BufferedImage image = ImageIO.read(tempFile);
-            Graphics2D g2d = image.createGraphics();
-            try {
-                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-                
-                for (int i = 1; i < annotations.size(); i++) {
-                    PdfAnnotationPreviewRequest.PageAnnotation annotation = annotations.get(i);
-                    double[] coords = annotation.getPdf();
-                    if (coords != null && coords.length >= 4) {
-                        drawAnnotationOnImage(g2d, annotation, baseImage.getWidth(), baseImage.getHeight(),
-                            pagePdfWidth, pagePdfHeight);
-                    }
+        Path conversionTempDir = Paths.get(properties.getTempDirectory(), jobId);
+        String userId = resolveUserId(baseTask, request, baseImages);
+        String businessId = baseTask.getBusinessId();
+        
+        try {
+            for (Map.Entry<Integer, String> entry : renderedFiles.entrySet()) {
+                Integer pageNumber = entry.getKey();
+                File imageFile = new File(entry.getValue());
+                if (!imageFile.exists()) {
+                    log.warn("Rendered image file not found for page {}", pageNumber);
+                    continue;
                 }
-            } finally {
-                g2d.dispose();
+                BufferedImage bufferedImage = ImageIO.read(imageFile);
+                String objectKey = buildPreviewImageObjectKey(userId, businessId, pageNumber, format);
+                minioStorageService.uploadFile(imageFile, objectKey);
+                String presignedUrl = minioStorageService.getPresignedUrl(objectKey, 60);
+                
+                renderedPages.put(pageNumber, PdfAnnotationPreviewResponse.PageImageInfo.builder()
+                    .pageNumber(pageNumber)
+                    .imageUrl(presignedUrl)
+                    .imageObjectKey(objectKey)
+                    .isRendered(true)
+                    .isBase(false)
+                    .width(bufferedImage != null ? bufferedImage.getWidth() : null)
+                    .height(bufferedImage != null ? bufferedImage.getHeight() : null)
+                    .build());
+                
+                Files.deleteIfExists(imageFile.toPath());
             }
-            // 使用正确的格式名称：jpg -> JPEG, png -> PNG
-            String imageFormat = format.equals("jpg") ? "JPEG" : "PNG";
-            ImageIO.write(image, imageFormat, tempFile);
+        } finally {
+            if (Files.exists(conversionTempDir)) {
+                cleanupTempDirectory(conversionTempDir);
+            }
         }
         
-        // 上传到MinIO
-        String objectKey = String.format("pdf-images-preview/%s/%s/page_%04d_annotated.%s",
-            baseImage.getUserId(), baseImage.getBusinessId(), pageNumber, format);
-        
-        minioStorageService.uploadFile(tempFile, objectKey);
-        
-        // 生成预签名URL
-        String presignedUrl = minioStorageService.getPresignedUrl(objectKey, 60);
-        
-        return PdfAnnotationPreviewResponse.PageImageInfo.builder()
-            .pageNumber(pageNumber)
-            .imageUrl(presignedUrl)
-            .imageObjectKey(objectKey)
-            .isRendered(true)
-            .isBase(false)
-            .width(renderedInfo.getWidth())
-            .height(renderedInfo.getHeight())
-            .build();
+        return renderedPages;
     }
     
-    /**
-     * 在已有图片上绘制注解
-     * 坐标计算逻辑参考 getFillPdf 方法
-     */
-    private void drawAnnotationOnImage(Graphics2D g2d, 
-            PdfAnnotationPreviewRequest.PageAnnotation annotation, 
-            int imageWidth,
-            int imageHeight,
-            double pagePdfWidth,
-            double pagePdfHeight) {
-        
-        double[] coords = annotation.getPdf();
-        // 参考 getFillPdf 的逻辑：x取第0个元素，y取第3个元素
-        double pdfX = coords[0];
-        double pdfY = coords[3];
-        
-        // 宽度和高度从 normalized 对象获取（参考 getFillPdf 的逻辑）
-        double pdfWidth;
-        double pdfHeight;
-        if (annotation.getNormalized() != null) {
-            pdfWidth = Double.parseDouble(annotation.getNormalized().getWidth());
-            pdfHeight = Double.parseDouble(annotation.getNormalized().getHeight());
+    private String buildPreviewImageObjectKey(String userId, String businessId, int pageNumber, String format) {
+        String safeUserId = StringUtils.isEmpty(userId) ? "anonymous" : userId;
+        String safeBusinessId = StringUtils.isEmpty(businessId) ? "unknown-business" : businessId;
+        String extension;
+        if ("JPEG".equalsIgnoreCase(format) || "JPG".equalsIgnoreCase(format)) {
+            extension = "jpg";
+        } else if ("PNG".equalsIgnoreCase(format)) {
+            extension = "png";
         } else {
-            // 降级方案：从坐标计算
-            pdfWidth = coords[2] - coords[0];
-            pdfHeight = coords[3] - coords[1];
+            extension = StringUtils.isEmpty(format) ? "png" : format.toLowerCase();
         }
-        
-        // 计算PDF坐标到图片坐标的缩放比例
-        double scaleX = imageWidth / pagePdfWidth;
-        double scaleY = imageHeight / pagePdfHeight;
-        
-        // 转换PDF坐标到图片坐标
-        // 注意：getFillPdf 使用 y=coords[3] 表示矩形底部，需要调整为顶部位置
-        int imageX = (int) Math.round(pdfX * scaleX);
-        int imageY = (int) Math.round((pdfY - pdfHeight) * scaleY);
-        int rectWidth = (int) Math.round(pdfWidth * scaleX);
-        int rectHeight = (int) Math.round(pdfHeight * scaleY);
-        
-        // 绘制背景
-        g2d.setColor(new Color(255, 255, 255, 200));
-        g2d.fillRect(imageX, imageY, rectWidth, rectHeight);
-        
-        // 绘制边框
-        g2d.setColor(Color.BLACK);
-        g2d.setStroke(new BasicStroke(2.0f));
-        g2d.drawRect(imageX, imageY, rectWidth, rectHeight);
-        
-        // 根据实际像素尺寸计算合适的字体大小
-        String text = annotation.getContents();
-        int maxFontSize = Math.min(rectWidth / (text.length() + 1), rectHeight - 10);
-        maxFontSize = Math.max(12, Math.min(maxFontSize, 48));
-        Font font = new Font("SansSerif", Font.PLAIN, maxFontSize);
-        g2d.setFont(font);
-        g2d.setColor(Color.BLACK);
-        
-        FontMetrics fm = g2d.getFontMetrics();
-        int textDrawX = imageX + (rectWidth - fm.stringWidth(text)) / 2;
-        int textDrawY = imageY + (rectHeight + fm.getAscent() - fm.getDescent()) / 2;
-        g2d.drawString(text, textDrawX, textDrawY);
+        return String.format("pdf-images-preview/%s/%s/page_%04d_annotated.%s",
+            safeUserId, safeBusinessId, pageNumber, extension);
+    }
+    
+    private String resolveUserId(PdfConversionTask baseTask, PdfAnnotationPreviewRequest request, List<PdfPageImage> baseImages) {
+        if (!StringUtils.isEmpty(baseTask.getUserId())) {
+            return baseTask.getUserId();
+        }
+        if (!StringUtils.isEmpty(request.getUserId())) {
+            return request.getUserId();
+        }
+        for (PdfPageImage image : baseImages) {
+            if (!StringUtils.isEmpty(image.getUserId())) {
+                return image.getUserId();
+            }
+        }
+        return "anonymous";
+    }
+    
+    private int determineRenderingDpi(List<PdfPageImage> baseImages) {
+        for (PdfPageImage image : baseImages) {
+            if (image.getRenderingDpi() != null) {
+                return image.getRenderingDpi();
+            }
+        }
+        return properties.getImageRendering().getDpi();
+    }
+    
+    private String determineImageFormat(List<PdfPageImage> baseImages) {
+        for (PdfPageImage image : baseImages) {
+            String objectKey = image.getImageObjectKey();
+            if (!StringUtils.isEmpty(objectKey) && objectKey.contains(".")) {
+                String ext = objectKey.substring(objectKey.lastIndexOf('.') + 1).toLowerCase();
+                if ("png".equals(ext)) {
+                    return "PNG";
+                }
+                if ("jpg".equals(ext) || "jpeg".equals(ext)) {
+                    return "JPEG";
+                }
+            }
+        }
+        String defaultFormat = properties.getImageRendering().getFormat();
+        if (StringUtils.isEmpty(defaultFormat)) {
+            return "PNG";
+        }
+        String upper = defaultFormat.toUpperCase();
+        if ("JPG".equals(upper)) {
+            return "JPEG";
+        }
+        return upper;
+    }
+    
+    private String prepareMarkJson(PdfAnnotationPreviewRequest request, PdfConversionTask baseTask) throws JsonProcessingException {
+        if (!StringUtils.isEmpty(request.getMarkJson())) {
+            return request.getMarkJson();
+        }
+        if (request.getPageAnnotations() == null || request.getPageAnnotations().isEmpty()) {
+            return null;
+        }
+        Map<String, Object> markJsonMap = new HashMap<>();
+        markJsonMap.put("fileName", baseTask.getFilename());
+        markJsonMap.put("totalPages", baseTask.getTotalPages());
+        markJsonMap.put("totalAnnotations", request.getTotalAnnotations());
+        markJsonMap.put("pageAnnotations", request.getPageAnnotations());
+        return objectMapper.writeValueAsString(markJsonMap);
+    }
+    
+    private Set<Integer> extractPageNumbers(PdfAnnotationPreviewRequest request) {
+        Set<Integer> pageNumbers = new LinkedHashSet<>();
+        if (request.getPageAnnotations() != null && !request.getPageAnnotations().isEmpty()) {
+            for (Map.Entry<String, List<PdfAnnotationPreviewRequest.PageAnnotation>> entry : request.getPageAnnotations().entrySet()) {
+                try {
+                    pageNumbers.add(Integer.parseInt(entry.getKey()));
+                } catch (NumberFormatException e) {
+                    log.warn("Invalid page number: {}", entry.getKey());
+                }
+            }
+            return pageNumbers;
+        }
+        if (!StringUtils.isEmpty(request.getMarkJson())) {
+            try {
+                MarkJsonDto markJsonDto = JSONUtil.toBean(request.getMarkJson(), MarkJsonDto.class);
+                if (markJsonDto.getPageAnnotations() != null) {
+                    for (String key : markJsonDto.getPageAnnotations().keySet()) {
+                        try {
+                            pageNumbers.add(Integer.parseInt(key));
+                        } catch (NumberFormatException e) {
+                            log.warn("Invalid page number in markJson: {}", key);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to parse markJson for page numbers", e);
+            }
+        }
+        return pageNumbers;
     }
     
     /**

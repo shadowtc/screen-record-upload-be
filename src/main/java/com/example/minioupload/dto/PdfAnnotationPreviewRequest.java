@@ -49,6 +49,12 @@ public class PdfAnnotationPreviewRequest {
      * Value: 该页的注解列表
      */
     private Map<String, java.util.List<PageAnnotation>> pageAnnotations;
+
+    /**
+     * 与 pageAnnotations 内容一致的原始 markJson 字符串
+     * 如果未提供则由后端根据 pageAnnotations 自动生成
+     */
+    private String markJson;
     
     /**
      * 单个页面注解
