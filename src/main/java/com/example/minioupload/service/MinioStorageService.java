@@ -1,21 +1,31 @@
 package com.example.minioupload.service;
 
 import com.example.minioupload.config.S3ConfigProperties;
+import io.minio.*;
+import io.minio.http.Method;
 import lombok.RequiredArgsConstructor;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
+import software.amazon.awssdk.services.s3.model.DeleteObjectsResponse;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.time.Duration;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * MinIO存储服务
@@ -41,6 +51,7 @@ public class MinioStorageService {
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
     private final S3ConfigProperties s3ConfigProperties;
+    private final MinioClient minioClient;
     
     /**
      * 上传文件到MinIO
@@ -276,5 +287,62 @@ public class MinioStorageService {
         }
         
         return contentType;
+    }
+
+    @SneakyThrows(Exception.class)
+    public ObjectWriteResponse uploadFileByBase64(String bucketName, String imageBase64, String objectName) {
+        if (!StringUtils.isEmpty(imageBase64)) {
+            InputStream in = base64ToInputStream(imageBase64);
+            // 直接使用minioClient上传，指定contentType为application/pdf
+            return minioClient.putObject(PutObjectArgs.builder()
+                    .bucket(bucketName)
+                    .object(objectName)
+                    .contentType("application/pdf")
+                    .stream(in, in.available(), -1)
+                    .build());
+        }
+        return null;
+    }
+    public static InputStream base64ToInputStream(String base64) {
+        ByteArrayInputStream stream = null;
+        try {
+            // 如果有 data:image/png;base64, 前缀，需要去掉
+            if (base64.contains(",")) {
+                base64 = base64.substring(base64.indexOf(",") + 1);
+            }
+            byte[] bytes = Base64.getDecoder().decode(base64.trim());
+            stream = new ByteArrayInputStream(bytes);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return stream;
+    }
+
+    @SneakyThrows(Exception.class)
+    public String getPresignedObjectUrlForPreview(String bucketName, String objectName) {
+        // 设置响应头，让浏览器预览而不是下载
+        Map<String, String> extraQueryParams = new HashMap<>();
+        extraQueryParams.put("response-content-disposition", "inline");
+        extraQueryParams.put("response-content-type", "application/pdf");
+
+        GetPresignedObjectUrlArgs args = GetPresignedObjectUrlArgs.builder()
+                .bucket(bucketName)
+                .object(objectName)
+                .method(Method.GET)
+                .extraQueryParams(extraQueryParams)
+                .build();
+        return minioClient.getPresignedObjectUrl(args);
+    }
+
+    /**
+     * 获取文件流
+     *
+     * @param bucketName 存储桶
+     * @param objectName 文件名
+     * @return 二进制流
+     */
+    @SneakyThrows(Exception.class)
+    public InputStream getObject(String bucketName, String objectName) {
+        return minioClient.getObject(GetObjectArgs.builder().bucket(bucketName).object(objectName).build());
     }
 }
