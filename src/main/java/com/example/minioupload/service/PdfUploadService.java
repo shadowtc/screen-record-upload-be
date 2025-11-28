@@ -1377,10 +1377,21 @@ public class PdfUploadService {
             List<AnnotationDto> annotations = pageEntry.getValue();
 
             for (AnnotationDto annotation : annotations) {
-                // 获取坐标信息：x取pdf的第一个元素，y取pdf的第四个元素
+                // 优先使用rect坐标（页面矩形坐标），如果不存在则使用pdf坐标
+                // rect坐标通常对应前端可视区域，对于预览来说更准确
+                List<Double> rectCoords = annotation.getRect();
                 List<Double> pdfCoords = annotation.getPdf();
-                double x = pdfCoords.get(0);
-                double y = pdfCoords.get(3);
+                
+                double x;
+                double y;
+                
+                if (CollectionUtil.isNotEmpty(rectCoords) && rectCoords.size() >= 4) {
+                    x = rectCoords.get(0);
+                    y = rectCoords.get(3);
+                } else {
+                    x = pdfCoords.get(0);
+                    y = pdfCoords.get(3);
+                }
 
                 // 宽度和高度取normalized的width和height
                 NormalizedDto normalized = annotation.getNormalized();

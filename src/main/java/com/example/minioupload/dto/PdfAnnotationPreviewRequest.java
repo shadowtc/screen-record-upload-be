@@ -93,7 +93,12 @@ public class PdfAnnotationPreviewRequest {
          * 渲染坐标（PDF坐标系）[x1, y1, x2, y2]
          */
         private double[] pdf;
-        
+
+        /**
+         * 页面矩形坐标 [x1, y1, x2, y2]
+         */
+        private double[] rect;
+
         /**
          * 缩放比例
          */
