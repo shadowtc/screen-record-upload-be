@@ -32,6 +32,11 @@ public class AnnotationDto {
     private String markValue;
 
     /**
+     * 页面矩形坐标 [x1, y1, x2, y2]
+     */
+    private List<Double> rect;
+
+    /**
      * PDF坐标 [x1, y1, x2, y2]
      */
     private List<Double> pdf;
