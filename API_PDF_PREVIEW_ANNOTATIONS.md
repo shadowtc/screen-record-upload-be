@@ -66,6 +66,8 @@
 }
 ```
 
+> **markJson 说明**：该字段为字符串形式的 JSON，内容与 `pageAnnotations` 完全一致。系统会先使用 markJson 在 PDF 上完成注解填充，再将填充后的 PDF 转换成图片。如果未显式提供 markJson，后端会根据 `pageAnnotations` 自动生成同样的 JSON 字符串。
+
 ### 参数说明
 
 | 参数 | 类型 | 必填 | 说明 |
@@ -76,6 +78,7 @@
 | exportTime | String | 否 | 导出时间（ISO 8601格式） |
 | totalAnnotations | Integer | 否 | 总注解数量 |
 | pageAnnotations | Map | 是 | 按页码分组的注解列表 |
+| markJson | String | 否 | 与 pageAnnotations 内容一致的 JSON 字符串，优先用于在PDF上填充注解 |
 
 ### 注解对象 (PageAnnotation)
 
@@ -205,14 +208,12 @@
 
 ## 渲染效果
 
-系统在图片上渲染注解时会：
-1. 下载基类图片
-2. 在指定位置绘制半透明白色背景框
-3. 绘制黑色边框
-4. 在框内居中绘制文字
-5. 自动选择合适的字体大小（12-48像素）
-6. 支持中文字体渲染
-7. 上传渲染后的图片到MinIO（路径：`pdf-images-preview/{userId}/{businessId}/`）
+系统会复用 `/api/pdf/getFillPdf` 的坐标解析逻辑，先在 PDF 上完成文字填充，再将填充后的 PDF 页面转换为图片：
+1. 解析 markJson/pageAnnotations（x 取 `pdf[0]`、y 取 `pdf[3]`，宽高取 normalized.width/height）
+2. 调用与 getFillPdf 相同的 PDF 填充代码，将文字写入临时 PDF
+3. 仅渲染包含注解的页面，保持与基类图片相同的 DPI 和格式
+4. 将新的页面图片上传到 MinIO（路径：`pdf-images-preview/{userId}/{businessId}/`）
+5. 其他未修改页面继续复用原始基类图片
 
 ## 使用流程
 
@@ -243,7 +244,8 @@
 
 ## 性能说明
 
-- **速度**：直接在图片上绘制文字（最快的方式）
+- **速度**：仅对包含注解的页面执行 PDF 填充 + 单页渲染，避免重新生成全部页面
+- **一致性**：复用 `/api/pdf/getFillPdf` 的坐标与填充逻辑，图片预览与正式填充保持 100% 匹配
 - **并发**：支持多个预览请求同时处理
 - **缓存**：渲染后的图片上传到MinIO，可重复访问
 - **临时文件**：处理完成后自动清理
@@ -259,10 +261,9 @@
    - 必须提供正确的tenantId
    - 系统只会查找匹配租户的基类任务
 
-3. **坐标系转换**
-   - PDF坐标系：左下角为原点，向上为Y正方向
-   - 图片坐标系：左上角为原点，向下为Y正方向
-   - 系统自动处理坐标转换，无需前端转换
+3. **坐标解析与 getFillPdf 一致**
+   - x 取 `pdf[0]`，y 取 `pdf[3]`（底部坐标），宽高取 normalized.width/height
+   - 后端先在 PDF 中完成填充，再将页面转换为图片，无需前端额外转换
 
 4. **图片格式**
    - 支持PNG和JPG格式
@@ -278,6 +279,10 @@
    - 预签名URL有效期60分钟
    - 过期后需要重新调用API获取新URL
    - 前端应缓存URL，避免频繁请求
+
+7. **markJson 与 pageAnnotations 同步**
+   - markJson 是 `pageAnnotations` 的 JSON 字符串版本，后端会优先使用 markJson 在 PDF 中完成注解后再渲染
+   - 如果未提供 markJson，系统会按 `pageAnnotations` 自动生成，确保与 `/api/pdf/getFillPdf` 一致
 
 ## 测试脚本
 
