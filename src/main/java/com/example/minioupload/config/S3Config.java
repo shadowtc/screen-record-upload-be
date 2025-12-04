@@ -8,6 +8,7 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 import java.net.URI;
@@ -54,10 +55,11 @@ public class S3Config {
      */
     @Bean
     public S3Client s3Client() {
-        log.info("Initializing S3Client with endpoint: {}, region: {}, bucket: {}", 
+        log.info("Initializing S3Client with endpoint: {}, region: {}, bucket: {}, path-style: {}", 
                 s3ConfigProperties.getEndpoint(), 
                 s3ConfigProperties.getRegion(),
-                s3ConfigProperties.getBucket());
+                s3ConfigProperties.getBucket(),
+                s3ConfigProperties.isPathStyleAccess());
         
         // 从配置创建凭证
         AwsBasicCredentials credentials = AwsBasicCredentials.create(
@@ -65,11 +67,17 @@ public class S3Config {
                 s3ConfigProperties.getSecretKey()
         );
 
+        // 创建S3配置，确保客户端与预签名器使用相同的路径样式策略
+        S3Configuration s3Configuration = S3Configuration.builder()
+                .pathStyleAccessEnabled(s3ConfigProperties.isPathStyleAccess())
+                .build();
+
         // 构建和配置S3客户端
         S3Client client = S3Client.builder()
                 .endpointOverride(URI.create(s3ConfigProperties.getEndpoint()))
                 .region(Region.of(s3ConfigProperties.getRegion()))
                 .credentialsProvider(StaticCredentialsProvider.create(credentials))
+                .serviceConfiguration(s3Configuration)
                 .forcePathStyle(s3ConfigProperties.isPathStyleAccess())
                 .build();
         
@@ -91,15 +99,18 @@ public class S3Config {
      * - 用于MinIO兼容性的自定义端点
      * - AWS区域设置
      * - 静态凭证（访问密钥 + 秘密密钥）
+     * - 路径样式访问（与S3Client保持一致）
      * 
-     * 注意：与S3Client不同，S3Presigner不支持forcePathStyle()方法，
-     * 但在正确配置端点后可以正常与MinIO配合工作。
+     * 注意：通过serviceConfiguration配置路径样式访问，
+     * 确保生成的预签名URL格式为：http://endpoint/bucket/key
+     * 而不是虚拟主机样式：http://bucket.endpoint/key
      * 
      * @return 配置好的S3Presigner实例
      */
     @Bean
     public S3Presigner s3Presigner() {
-        log.info("Initializing S3Presigner");
+        log.info("Initializing S3Presigner with path-style access: {}", 
+                s3ConfigProperties.isPathStyleAccess());
         
         // 从配置创建凭证
         AwsBasicCredentials credentials = AwsBasicCredentials.create(
@@ -107,14 +118,20 @@ public class S3Config {
                 s3ConfigProperties.getSecretKey()
         );
 
+        // 创建S3配置，启用路径样式访问
+        S3Configuration s3Configuration = S3Configuration.builder()
+                .pathStyleAccessEnabled(s3ConfigProperties.isPathStyleAccess())
+                .build();
+
         // 构建和配置S3预签名器
         S3Presigner presigner = S3Presigner.builder()
                 .endpointOverride(URI.create(s3ConfigProperties.getEndpoint()))
                 .region(Region.of(s3ConfigProperties.getRegion()))
                 .credentialsProvider(StaticCredentialsProvider.create(credentials))
+                .serviceConfiguration(s3Configuration)
                 .build();
         
-        log.info("S3Presigner initialized successfully");
+        log.info("S3Presigner initialized successfully with path-style access enabled");
         return presigner;
     }
 }
